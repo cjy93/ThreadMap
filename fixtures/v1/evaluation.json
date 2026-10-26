@@ -1,0 +1,768 @@
+{
+ "version": "threadmap-fixtures-v1",
+ "root_examples": [
+  {
+   "native_id": "7378D4A04D6F231D7295",
+   "chat": "builders",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Hackathons/Solutions/Authentication/Tokens/Refresh flow"
+  },
+  {
+   "native_id": "8AE2C2ABED3BFF663181",
+   "chat": "builders",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Hackathons/Solutions"
+  },
+  {
+   "native_id": "8276E34F91EB8D4399DF",
+   "chat": "builders",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/History"
+  },
+  {
+   "native_id": "FA580E18BCB1017E1350",
+   "chat": "builders",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Hackathons/Solutions/Deployment"
+  },
+  {
+   "native_id": "BC2B4286157A5512EF0B",
+   "chat": "builders",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Python"
+  },
+  {
+   "native_id": "2D82440F6CF33FA7DF2D",
+   "chat": "builders",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Hackathons/Solutions/Deployment"
+  },
+  {
+   "native_id": "C1A979B5979BA8495F22",
+   "chat": "builders",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Hackathons/Solutions/Authentication/Tokens/Access token lifetime"
+  },
+  {
+   "native_id": "3EB0D8AD3B170BDBC3D9",
+   "chat": "builders",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Hackathons/Solutions/Deployment"
+  },
+  {
+   "native_id": "08B69E472C6525ED2E78",
+   "chat": "study",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Algorithms/Dynamic programming"
+  },
+  {
+   "native_id": "B8CD5A1FFB403BA32536",
+   "chat": "study",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Python/Generators"
+  },
+  {
+   "native_id": "758B6AF42E1D73893348",
+   "chat": "study",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/History"
+  },
+  {
+   "native_id": "3EB09E5B620D05B6DD89",
+   "chat": "study",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Authentication/Tokens"
+  },
+  {
+   "native_id": "AD525F91527D39A5203E",
+   "chat": "study",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Python/Async"
+  },
+  {
+   "native_id": "3EB051468E7C3666E193",
+   "chat": "music",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Music/Practice"
+  },
+  {
+   "native_id": "2285B810D4D4C296A51A",
+   "chat": "builders",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Programming/Hackathons/Tips"
+  },
+  {
+   "native_id": "E709F1DB7D33B5F9C1F6",
+   "chat": "music",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Music/Practice"
+  },
+  {
+   "native_id": "72DA340FF99F72F423D0",
+   "chat": "music",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Music/Practice"
+  },
+  {
+   "native_id": "33A59BDB952104E99396",
+   "chat": "music",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Music/Practice"
+  },
+  {
+   "native_id": "2CA33C5CD369D654AE9A",
+   "chat": "music",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Music/Practice"
+  },
+  {
+   "native_id": "05A4A3267A4513B0A0B6",
+   "chat": "music",
+   "expected_primary_root": "KNOWLEDGE",
+   "admissible_roots": [
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "K/Music/Practice"
+  },
+  {
+   "native_id": "5BACE4E6D2690B595711",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Coordination/Event planning"
+  },
+  {
+   "native_id": "DB37A2D08DA2AE89E3E1",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Coordination/Event planning"
+  },
+  {
+   "native_id": "C9E2664E95531DC9C42F",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "1BA9A269D723F846B24C",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Coordination"
+  },
+  {
+   "native_id": "DAC9BC554578CE421CD0",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "1CE353CF51908980BD01",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Coordination"
+  },
+  {
+   "native_id": "27B9CEEA1EAABFF10F71",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Coordination"
+  },
+  {
+   "native_id": "70AE518B5D4F1259173F",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "D9B1DCE76D86DCB027F3",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Coordination"
+  },
+  {
+   "native_id": "1F8BC97EB7BEA5E6B5C4",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "FD841DF6A9D4B6AB1754",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Scheduling"
+  },
+  {
+   "native_id": "0412E2BCA25B93704E05",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Scheduling"
+  },
+  {
+   "native_id": "3EB0AF0CD902247E5F9C",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "F05482DCF3799EAE794A",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Scheduling"
+  },
+  {
+   "native_id": "BF3A0F736AC60FE225B0",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "605D6CC6837237DBC9AF",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Scheduling"
+  },
+  {
+   "native_id": "CC40C96D838583178F9B",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Scheduling"
+  },
+  {
+   "native_id": "3EB02270BE71910AA74C",
+   "chat": "music",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Plans"
+  },
+  {
+   "native_id": "3EB05578D8E6B05FC473",
+   "chat": "music",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Plans"
+  },
+  {
+   "native_id": "3EB0D4F4559A98ABD856",
+   "chat": "music",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Plans"
+  },
+  {
+   "native_id": "0F869D6FF56A00A15ED2",
+   "chat": "builders",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Code repositories"
+  },
+  {
+   "native_id": "0F869D6FF56A00A15ED2",
+   "chat": "builders",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Code repositories"
+  },
+  {
+   "native_id": "6445961024071AF65A0F",
+   "chat": "builders",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Web links"
+  },
+  {
+   "native_id": "EEFD7045982EA2158020",
+   "chat": "builders",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES",
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "R/Code repositories"
+  },
+  {
+   "native_id": "EEFD7045982EA2158020",
+   "chat": "builders",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES",
+    "KNOWLEDGE"
+   ],
+   "expected_topic_path": "R/Code repositories"
+  },
+  {
+   "native_id": "5B9E80CF0F55E9667356",
+   "chat": "builders",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Web links"
+  },
+  {
+   "native_id": "C4769ECD467449DFF06A",
+   "chat": "builders",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Code repositories"
+  },
+  {
+   "native_id": "C4769ECD467449DFF06A",
+   "chat": "builders",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Code repositories"
+  },
+  {
+   "native_id": "CC8B1FADEFE1173557BF",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Books/Programming books"
+  },
+  {
+   "native_id": "5FAE9D3D87CEC780A82A",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Web links"
+  },
+  {
+   "native_id": "6A751F7E019AC6E7AD57",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Books/Programming books"
+  },
+  {
+   "native_id": "6A751F7E019AC6E7AD57",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Books/Programming books"
+  },
+  {
+   "native_id": "43CCEE3A7F51D24CFF77",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Web links"
+  },
+  {
+   "native_id": "47C048EF30B7A5183774",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Books/Programming books"
+  },
+  {
+   "native_id": "47C048EF30B7A5183774",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Books/Programming books"
+  },
+  {
+   "native_id": "3EB0810B80ADE3E5CEAA",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Web links"
+  },
+  {
+   "native_id": "3EB0748156B665C2A6C2",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Books/Programming books"
+  },
+  {
+   "native_id": "3EB0748156B665C2A6C2",
+   "chat": "study",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Books/Programming books"
+  },
+  {
+   "native_id": "E52DE69FC1D7D67495DC",
+   "chat": "music",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Media"
+  },
+  {
+   "native_id": "3EB0DADA964338443B13",
+   "chat": "music",
+   "expected_primary_root": "RESOURCES",
+   "admissible_roots": [
+    "RESOURCES"
+   ],
+   "expected_topic_path": "R/Media"
+  }
+ ],
+ "cross_chat_pairs": [
+  {
+   "a": "builders:K/Programming/Hackathons/Solutions/Authentication/Tokens",
+   "b": "study:K/Programming/Authentication/Tokens",
+   "expected_related": true,
+   "reason": "both discuss refresh-token rotation; shared oauth.net link"
+  },
+  {
+   "a": "builders:K/Programming/Hackathons/Solutions/Authentication/Tokens/Refresh flow",
+   "b": "study:K/Programming/Authentication/Tokens",
+   "expected_related": true,
+   "reason": "shared resource https://oauth.net/2/refresh-tokens/"
+  },
+  {
+   "a": "builders:K/Programming/Python",
+   "b": "study:K/Programming/Python",
+   "expected_related": true,
+   "reason": "both about Python tooling/practice"
+  },
+  {
+   "a": "builders:K/History",
+   "b": "study:K/History",
+   "expected_related": true,
+   "reason": "history of computing / hackathons"
+  },
+  {
+   "a": "builders:K/Programming/School work/Tips/Algorithms",
+   "b": "study:K/Programming/Algorithms",
+   "expected_related": true,
+   "reason": "algorithm revision and DP"
+  },
+  {
+   "a": "builders:G/Casual chat",
+   "b": "study:G/Casual chat",
+   "expected_related": false,
+   "reason": "social chatter only"
+  },
+  {
+   "a": "builders:K/Programming/Hackathons/Tips",
+   "b": "music:K/Music/Practice",
+   "expected_related": false,
+   "reason": "word overlap (practice) without shared subject"
+  },
+  {
+   "a": "study:K/Programming/Python/Generators",
+   "b": "music:K/Music/Theory",
+   "expected_related": false,
+   "reason": "unrelated subjects"
+  },
+  {
+   "a": "builders:R/Web links",
+   "b": "study:R/Web links",
+   "expected_related": false,
+   "reason": "generic link lists with different subjects"
+  },
+  {
+   "a": "builders:K/Programming/Hackathons/Solutions/Deployment",
+   "b": "study:K/Programming/Authentication/Sessions",
+   "expected_related": false,
+   "reason": "different subjects"
+  },
+  {
+   "a": "builders:K/Programming",
+   "b": "music:K/Music",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  },
+  {
+   "a": "builders:K/Programming/Hackathons/Solutions/Authentication/Tokens/Refresh flow",
+   "b": "music:K/Art",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  },
+  {
+   "a": "builders:K/Programming/School work",
+   "b": "music:R/Media",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  },
+  {
+   "a": "builders:G/Coordination",
+   "b": "music:K/Music/Theory",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  },
+  {
+   "a": "builders:R/Web links",
+   "b": "music:K/Art/Drawing",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  },
+  {
+   "a": "builders:K/Programming/Hackathons/Solutions/Authentication",
+   "b": "music:R/Web links",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  },
+  {
+   "a": "builders:K/Programming/Hackathons/Solutions/Deployment",
+   "b": "music:K/Music/Practice",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  },
+  {
+   "a": "builders:K/Programming/Python",
+   "b": "music:G/Plans",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  },
+  {
+   "a": "builders:G/Casual chat",
+   "b": "music:K/Music",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  },
+  {
+   "a": "builders:K/Programming/Hackathons",
+   "b": "music:K/Art",
+   "expected_related": false,
+   "reason": "unrelated chats/subjects"
+  }
+ ],
+ "finding_tasks": [
+  {
+   "id": "F1",
+   "task": "With Show depth = 0, from Knowledge, open the refresh-flow sequence diagram file.",
+   "expect": {
+    "native_id": "56B5F108203DAE3DD45D",
+    "file": "refresh-flow-diagram.pdf"
+   },
+   "depth_shown": 0,
+   "deep": true
+  },
+  {
+   "id": "F2",
+   "task": "With Show depth = 1, from Programming, find who suggested binding the refresh token to the device.",
+   "expect": {
+    "native_id": "5E0DDBBB16F2368AE442"
+   },
+   "depth_shown": 1,
+   "deep": true
+  },
+  {
+   "id": "F3",
+   "task": "Expand Knowledge → Programming → Hackathons → Solutions → Authentication → Tokens → Refresh flow and open the OAuth spec link message.",
+   "expect": {
+    "native_id": "91BBA7A00138B155DEAC"
+   },
+   "depth_shown": "all",
+   "deep": true
+  },
+  {
+   "id": "F4",
+   "task": "Find the judging rubric PDF shared in Builders and Hackathons.",
+   "expect": {
+    "file": "judging-rubric.pdf"
+   },
+   "depth_shown": 2,
+   "deep": false
+  },
+  {
+   "id": "F5",
+   "task": "Find the Fluent Python sample chapter in the study group.",
+   "expect": {
+    "file": "fluent-python-sample.pdf"
+   },
+   "depth_shown": 2,
+   "deep": false
+  },
+  {
+   "id": "F6",
+   "task": "Find the Chinese explanation of generators.",
+   "expect": {
+    "text_contains": "生成器"
+   },
+   "depth_shown": 2,
+   "deep": false
+  },
+  {
+   "id": "F7",
+   "task": "Follow the related link from the study group Tokens topic into Builders and open evidence on both sides.",
+   "expect": {
+    "related": true
+   },
+   "depth_shown": 2,
+   "deep": false
+  },
+  {
+   "id": "F8",
+   "task": "Find the venue logistics discussion and its (unavailable) map image.",
+   "expect": {
+    "file": "venue-map.png",
+    "availability": "unavailable"
+   },
+   "depth_shown": 2,
+   "deep": false
+  },
+  {
+   "id": "F9",
+   "task": "Using Date + Topic + Missed, list missed messages about Tokens from 2–3 Sep 2026 (SGT).",
+   "expect": {
+    "filter": {
+     "from": "2026-09-02",
+     "to": "2026-09-03",
+     "topic": "Tokens",
+     "status": "missed"
+    }
+   },
+   "depth_shown": 1,
+   "deep": true
+  },
+  {
+   "id": "F10",
+   "task": "Find the hand sketch image Mei commented on.",
+   "expect": {
+    "file": "hand-sketch.png"
+   },
+   "depth_shown": 2,
+   "deep": false
+  }
+ ]
+}

@@ -1,99 +1,107 @@
-# ThreadMap implementation handoff
+# ThreadMap
 
-Version 2.1 — 25 October 2026 — cloud-hosted linked-device prototype with recursive topics and depth selection.
+ThreadMap turns busy WhatsApp conversations into navigable knowledge maps. Every selected chat gets three permanent roots — **Knowledge**, **General Chat** and **Resources** — with a recursive, evidence-backed topic hierarchy proposed by NVIDIA Nemotron (via Nebius Token Factory). Node size shows how many matching messages a branch holds (including every hidden descendant), and any root or topic opens the exact source messages and files beneath it, at any depth, without expanding the tree first.
 
-Prepared for the Nebius x NVIDIA Global AI Hackathon, Best Apps and Agents Track. This revision replaces the earlier export-based and local-first implementation baselines. P0 requires a live Baileys connection and an actual Nebius Serverless Endpoint deployment. Manual transcript exports and uploads are outside P0.
+> **Status (25 Oct 2026):** implementation, deterministic tests and local production-image runs are complete. The live gates — real Nemotron inference (A18), real WhatsApp pairing (A19) and the Nebius Endpoint deployment (A20) — are **BLOCKED_EXTERNAL** until the owner supplies credentials. See [`reports/acceptance.md`](reports/acceptance.md). Nothing in this repository claims a cloud deployment or live run that has not happened.
 
-This package is a specification for Claude Code to implement. It does not contain a completed application or claim that any implementation tests have passed.
+Built for the Nebius × NVIDIA Global AI Hackathon (Best Apps and Agents). Specification: [`docs/threadmap/`](docs/threadmap/README.md).
 
-## Read these files in order
+## How it works
 
-1. `THREADMAP_BUILD_SPEC.md` — product proposal, fixed behavior, architecture, data contracts, and acceptance gates.
-2. `NEBIUS_DEPLOYMENT.md` — required cloud topology, deployment procedure, persistent storage, trusted origin, and recovery checks.
-3. `IMPLEMENTATION_TASKS.md` — T01–T16 tasks, deliverables, day-by-day plan, and submission preparation.
-4. `CLAUDE_GOAL.md` — ready-to-paste implementation goal and explicit completion condition.
-5. `env.example` — proposed runtime/deployment configuration; it contains no credentials.
-6. `SOURCES.md` — dated primary sources and the specific external facts used in the proposal.
+```
+ phone (owner) ──QR──► Baileys companion ─┐            ┌─► Next.js web/API ◄── browser (SSE)
+                     (linked device)      │ PostgreSQL │
+                                          ├────────────┤
+ Nebius Token Factory ◄── pg-boss worker ─┘ (sources,  └─► Object Storage (cached files)
+ (Nemotron Ultra/Nano/Super)               graph, review,
+                                           queue, encrypted auth)
+```
 
-Copy this directory into a new or existing ThreadMap repository as `docs/threadmap/`. The Markdown files are intended to be repository documentation. In Claude Code, read the files and use the goal in `CLAUDE_GOAL.md`.
+One container image, supervised as **three separate Node processes** (`dist/supervisor.js`): the web server (only exposed port, 3000), the WhatsApp companion and the analysis worker. All durable state is external: PostgreSQL (sources, recursive topics, placements, review state, depth preferences, refinement frontiers, queue, encrypted Baileys credentials + Signal keys, trusted origin) and S3-compatible Object Storage (cached attachments).
 
-## Frozen decisions
+- **Capture:** incoming *and* owner-sent messages from selected chats only; native-key deduplication; revisions, edits, revocations with tombstones; out-of-order controls; PN/LID alias learning; bounded memory-only pre-selection buffer; new-only cutoff; history cap that never caps live capture. Sources commit with an analysis outbox *before* any model call.
+- **Analysis:** Nano extracts discussion units; Ultra proposes a flat-node recursive taxonomy in bounded pieces and leaves a **refinement frontier** that continues under the *same* logical budget ledger; Super repairs invalid output, resolves ambiguous assignments and verifies cross-chat links. All output is validated in code (IDs, scope, roots, cycles, empty topics, evidence revisions) and published atomically.
+- **Navigation:** Show depth 0/1/2/3/custom/All is display-only; counts, logical sizes, content and bulk scopes are identical at every depth. Node diameter `D(n) = sqrt(64² + (220² − 64²) · clamp(ln(1+n)/ln(1+10000), 0, 1))` from server-derived distinct matching counts. ≤200 visible nodes, lazy child paging and branch focus; stored depth is never truncated.
+- **Review:** per-user, revision-aware Read/Missed; two-second foreground dwell marks only the focused revision; bulk actions freeze `(message, revision)` pairs; independent of WhatsApp receipts. ThreadMap never sends messages or read receipts.
 
-- Build a responsive ThreadMap web app with a separate, long-running Node.js companion using Baileys to pair through WhatsApp Linked Devices.
-- Deploy a custom container image on a regular CPU Nebius Serverless Endpoint. Supervise three separate Node processes inside it: Next.js web server on port 3000, Baileys companion, and pg-boss AI worker. Only the web port is exposed. No GPU model weights are hosted in this container; it calls Nemotron through Token Factory.
-- Keep canonical data, review state, queue state, and encrypted WhatsApp auth in external Nebius Managed PostgreSQL through a private TLS connection. Put files in private Nebius Object Storage and encryption/API keys in SecretStash. Endpoint disk is temporary.
-- Allow one linked WhatsApp account per private workspace. Select which conversations ThreadMap retains and analyzes. This selection is an application filter, not a WhatsApp permission boundary.
-- Receive new incoming and outgoing messages automatically. Offer bounded available-history synchronization and report observed coverage without promising the entire archive.
-- Give every chat exactly three top-level categories: Knowledge, General Chat, and Resources.
-- Let Nemotron propose a recursive, content-supported topic hierarchy and inferred discussions, with citations to canonical source messages. Knowledge's suggested first-level subtopics are Programming, Music, Art, and History; deeper branches can continue through Hackathons or School work, then Solutions or Tips, and further supported levels.
-- Use the same recursive hierarchy engine beneath all three roots. There is no hard-coded two-level topic limit; each branch stops when further subdivision would not help explain its source content.
-- Provide a **Show depth** display control and direct access to a category or topic's matching messages and files, including all deeper descendants. Users do not have to expand to the deepest level to read the content.
-- Open exact captured messages and available files inside ThreadMap. Fetch media on demand; show explicit unavailable/pending states.
-- Persist per-user message review state; derive discussion/topic/chat Read and Missed states from it.
-- Include useful links between selected chats, with evidence on both sides.
-- Use Nemotron 3 Ultra for taxonomy reasoning, Nano for routine extraction, and Super for escalation through Nebius Token Factory.
-- Keep ThreadMap review status separate from WhatsApp read receipts; provide no message-sending controls.
-- Provide `/demo` through isolated synthetic guest workspaces; demo accounts cannot pair WhatsApp or access the owner's data. A separate demo endpoint is optional. Replayed demonstrations must be labeled as such.
-- Keep optional services out of the critical path.
+## Quick start (local development)
 
-Closing the browser or turning off the user's laptop does not stop the cloud companion. A cloud outage, stopped endpoint, or broken WhatsApp session can still interrupt synchronization; report gaps and connection state honestly. Nebius endpoints do not inherit the automatic restart feature documented for Serverless Jobs, so include child-process supervision, monitoring, and an endpoint recovery runbook. This design does not promise uninterrupted 24/7 service. [S34–S37, S43]
+Requirements: Node 24 LTS (tested 24.14.1), Docker (for PostgreSQL / the image).
 
-Serverless Jobs are optional P1 work for finite backfill or evaluation. They are not a per-message launch mechanism or the home of the persistent WhatsApp connection. The required P0 deployment is the Endpoint. [S34, S42]
+```bash
+npm ci
+docker run -d --name tm-pg -e POSTGRES_USER=threadmap -e POSTGRES_PASSWORD=devpass -e POSTGRES_DB=threadmap -p 5432:5432 postgres:17-alpine
+export DATABASE_URL=postgres://threadmap:devpass@127.0.0.1:5432/threadmap
+npm run db:migrate
+npm test                 # 43 integration/unit tests against real PostgreSQL
+npm run lint && npm run typecheck
+npm run image:build      # production image (docker build -t threadmap:local .)
+```
 
-Baileys is an unofficial library, not a Meta-approved consumer API. Treat the connector as experimental and disclose its compatibility/account risk. The application still receives and stores selected chat data; “no export” means no manual transcript download/upload. Selected analysis content is sent to Nebius. [S5, S23–S28]
+Run the full image locally (development only — this cannot satisfy the cloud gate):
 
-## Recursive topics and depth selection
+```bash
+npm run secrets:generate > .env.compose          # then append the dev settings from .env.development.local.example
+docker compose -p tmlocal up -d                  # db + migrate + app (3 supervised processes)
+docker compose -p tmlocal exec app node dist/cli/bootstrap-origin.js <DEPLOYMENT_ID> http://localhost:3000
+docker compose -p tmlocal exec -e OWNER_EMAIL=you@example.com -e OWNER_PASSWORD='12+ chars' app node dist/cli/create-owner.js
+E2E_BASE_URL=http://localhost:3000 npm run test:e2e
+```
 
-Version 2.1 replaces the earlier maximum of two topic levels below each root. Keep exactly three permanent roots, but allow a finite hierarchy of any content-supported depth below them. These examples are suggestions for Nemotron, not compulsory empty folders or a fixed sequence every branch must follow:
+Open http://localhost:3000 → **Try the demo** (isolated synthetic replay, pairing disabled) or sign in as the owner → **Connect WhatsApp**.
 
-| Depth | Example beneath Knowledge |
+### Rebuild and restart after code changes
+
+The containers run the `threadmap:local` image, so code changes (including UI/CSS) appear only after you rebuild the image and recreate the app:
+
+```bash
+npm run image:build                    # rebuild threadmap:local from the current code
+docker compose -p tmlocal up -d        # recreates migrate + app on the new image; db is left running
+docker compose -p tmlocal ps           # app should be "Up"; migrate "Exited (0)" is normal
+docker compose -p tmlocal logs -f app  # watch startup (Ctrl+C stops following, not the app)
+```
+
+If `up -d` reports nothing to recreate, force it with `docker compose -p tmlocal up -d --force-recreate migrate app`. Then hard-refresh the browser (Ctrl+Shift+R) so it doesn't use cached styles.
+
+Other everyday commands:
+
+| Command | Effect |
 | --- | --- |
-| 0 | Knowledge — the category root. |
-| 1 | Programming, Music, Art, History. |
-| 2 | Programming → Hackathons; Programming → School work. |
-| 3 | Hackathons → Solutions; School work → Tips. |
-| 4 and deeper | Solutions → Authentication → Tokens → Refresh flow, when the messages support those distinctions. |
+| `docker compose -p tmlocal restart app` | Restart the app on the **same** image (does not pick up code changes). |
+| `docker compose -p tmlocal stop` / `start` | Pause and resume the whole stack; data is kept. |
+| `docker compose -p tmlocal down` | Remove the containers. **This loses the local database** (the `db` service has no named volume), so you must repeat `bootstrap-origin` and `create-owner` and pair WhatsApp again. |
 
-A topic can contain both more specific child topics and discussions of its own. Short branches remain short. Exact source messages and available files remain reachable at every depth, including directly from the category root. Stable topic IDs and parent relationships define the tree; reanalysis must preserve user corrections and canonical message/review identities.
+On Windows, if Docker is installed only inside WSL, run these commands from a WSL shell in the repo folder (for example `cd "/mnt/c/Users/<you>/.../ThreadMap"`), or prefix each one with `wsl -e bash -lc '…'`. Inside WSL, use `docker build -t threadmap:local .` instead of `npm run image:build`: WSL may pick up the Windows `npm`, which cannot see WSL's Docker.
 
-**Show depth** controls how much of that tree is displayed: category roots only (`0`), `1`, `2`, `3`, a custom nonnegative safe integer, or **All levels**. Default to 2 on first use; a value above the current tree height shows all currently available levels without creating topics. Depth is always measured from the category root, even when focusing a branch. Remember the user's choice for each chat; an explicit depth in the URL overrides the saved choice. All levels is explored progressively, with lazy loading, pagination, and at most 200 visible graph nodes; the visible-node budget must not flatten or truncate the stored hierarchy.
+## Commands
 
-Clicking any category or topic opens a paginated content view containing its own matching source messages and files plus those of every descendant topic. A node at the chosen depth boundary shows that deeper topics exist and offers **Show next level**, but reading its content does not require that action. Show each source's actual topic path so a shallow view still explains where it belongs.
-
-Depth changes visibility only. Date, topic, chat, and Read/Missed filters continue to select the same canonical messages; counts and bulk-review membership must not change when only depth changes. Preserve a selected deep topic's filter chip even when its node is hidden. Opening a parent, changing depth, or expanding a branch does not mark its messages Read; only the existing explicit or revision-aware source-view review actions do so. Navigation and depth changes make zero inference calls.
-
-Claude Code must demonstrate this behavior with at least six topic levels below Knowledge, shallower sibling branches, and the same matching source set at depths `0`, `1`, `2`, `6`, and All levels. A deeply nested message and its available file must be reachable from the root or first topic level without expanding the intervening topics. The detailed data, model, UI, and acceptance contracts are in the build specification and implementation tasks.
-
-## Accounts and installations
-
-| Item | What the owner needs |
+| Command | Purpose |
 | --- | --- |
-| Node.js | No account or API key. The cloud image includes the runtime; app users do not install Node.js. The coding environment targets Node 24 LTS and records its tested version. |
-| Baileys | No account or API key. The coding agent installs and pins the library inside the application image after its connection smoke test. |
-| npm/package manager | Installing the public dependency does not require a package-publishing account. |
-| WhatsApp | An existing account on the owner's phone. Scan the app's fresh QR under WhatsApp → Linked Devices. No WhatsApp password is collected. |
-| Nebius Token Factory | Account/project, server-side API key, model access, and a chosen spending cap. |
-| Nebius AI Cloud | A project with billing, suitable region/quota, IAM permissions, network/subnet, and container-registry push/pull access. Cloud CLI or service-account credentials are separate from the Token Factory key. |
-| Cloud data and secrets | Managed PostgreSQL, a private Object Storage bucket, SecretStash entries, and least-privilege credentials configured by the deployment workflow. |
-| Git repository and hackathon accounts | Needed for code handoff and eventual public submission; these are independent of pairing. |
-| Optional services | LangSmith, Tavily, and Toloka/Tendem can wait for their separately scoped tasks. |
+| `npm run db:migrate` | Apply Drizzle migrations under an advisory lock (`MIGRATION_DATABASE_URL`). |
+| `npm run fixtures:generate` | Regenerate the deterministic native-event fixtures + manifest + evaluation split (`fixtures/v1`). |
+| `npm run owner:create` | Provision the owner account (public sign-up is disabled). |
+| `npm run secrets:generate` | Generate `BETTER_AUTH_SECRET`, `WHATSAPP_AUTH_ENCRYPTION_KEY`, `DEPLOYMENT_ID` once, for SecretStash. |
+| `npm run origin:bootstrap` | In-network admin: write the observed HTTPS origin into `runtime_settings`. |
+| `npm run models:discover` | Discover exact Nemotron IDs from `GET /v1/models` and capability-test each role (A18 prep). |
+| `tsx src/cli/live-inference.ts` | A18: real pipeline run on fresh synthetic events → `reports/live-inference.json`. |
+| `npm run perf:run` | 10,000-message performance check → `reports/performance-data.json`. |
+| `deploy/nebius/deploy.sh <step>` | Nebius Endpoint deployment steps (see [`deploy/nebius/README.md`](deploy/nebius/README.md)). |
 
-No Meta developer account, Business Platform token, or business-number onboarding is needed for this chosen connector. Node.js and Baileys setup references are S30–S32. Never paste the Nebius key, pairing QR, or saved WhatsApp session into an assistant conversation or commit them to a repository.
+## Repository map
 
-`env.example` describes the hosted configuration the coding agent must implement, with `LLM_PROVIDER=nebius` and `SOURCE_PROVIDER=baileys`. Fixture modes remain available for development and isolated demo data, but cannot satisfy the live gates. The implementation must generate secrets privately and retain them in SecretStash, use an encrypted persistent Baileys auth store, and document deployment. This handoff is not itself runnable application code.
+- `src/server/ingest` — Baileys event normalization (pinned 7.0.0-rc14 shapes), canonical persistence, pre-selection buffer.
+- `src/server/graph` — recursive tree, shared content-filter contract, distinct recursive counts, projection, node content.
+- `src/server/ai` — providers (Nebius, fixture), router (budget ledger, retries, repair), taxonomy validation, pipeline.
+- `src/server/wa` — encrypted PostgreSQL AuthStateStore, single-owner lease with fencing, companion.
+- `src/processes` — supervisor, companion and worker entrypoints. `src/app` + `src/ui` — Next.js routes and React UI.
+- `src/app/globals.css` — the whole visual theme: CSS variables for the **night** (dark) and **twilight** (light) themes, glass panels, node colours. Fonts (Fraunces, Albert Sans, Antonio) load via `next/font` in `src/app/layout.tsx`; `src/ui/ThemeToggle.tsx` switches `<html data-theme>` and remembers the choice in `localStorage`.
+- `fixtures/v1` — synthetic chats (300 human messages), control-event sequences, expected manifest, evaluation split.
+- `tests/`, `e2e/` — Vitest integration tests (real PostgreSQL) and Playwright browser tests.
 
-Set an infrastructure budget before creating paid cloud resources, separately from the inference limits. Endpoint compute, database, storage, and other cloud charges are not bounded by the application's LLM budget, and promotional Token Factory credits do not establish cloud-hosting credit. [S41]
+## Honest limitations
 
-## Public URL and durable deployment
+Baileys is an **unofficial** WhatsApp Web library; this is an experimental linked-device prototype and WhatsApp may restrict it. The deployment stores selected chats in its database and sends selected text to Nebius Token Factory. History recovery is best-effort and coverage gaps are shown, not hidden. A stopped Endpoint does not ingest messages. See [`docs/threadmap/DECISIONS.md`](docs/threadmap/DECISIONS.md) for implementation decisions and known gaps.
 
-The actual endpoint HTTPS URL is assigned during deployment. The deployment CLI must read that URL from the authenticated cloud response and store its exact origin in the database's `runtime_settings`. Authentication and QR pairing stay disabled until this trusted origin is available. Do not derive trusted origins from arbitrary incoming Host headers or expose a public setup endpoint.
+## License
 
-Endpoint configuration changes require the replacement procedure documented in `NEBIUS_DEPLOYMENT.md`. An endpoint stop/restart preserves its URL but discards its local disk; deleting and recreating an endpoint changes its URL. Persistent data and the WhatsApp encryption key must survive both operations outside the container. The deployment procedure must update the trusted origin for a replacement and test sign-in, QR access, source files, and reconnects. [S35, S37]
-
-## Completion has two gates
-
-**BUILD_READY:** All P0 tasks and A01–A20 pass with evidence. This includes A18 actual Nemotron inference; A19 genuine QR pairing/live WhatsApp messages and a usable source-to-map path; and A20 an actual Nebius HTTPS deployment that continues receiving messages while the user's laptop is off and preserves data/session state through endpoint restart. Record A20 evidence in `reports/cloud-deployment.json`. A local build, planned deployment, fixture source, or replay alone cannot satisfy these gates.
-
-**SUBMISSION_READY:** BUILD_READY plus human-reviewed results meeting the specified targets, a working judge-accessible deployment, a public licensed repository, and actually published required submission assets, including the public YouTube video. An offline fixture provider cannot satisfy either final gate. Missing external access is reported after independent work is complete; a publication-only blocker does not invalidate an already achieved BUILD_READY status.
-
-The official submission deadline is 30 October 2026 at 10:00 a.m. PDT, or **31 October 2026 at 1:00 a.m. Singapore time**. Aim to finish and submit on 30 October Singapore time. See the official links in `SOURCES.md` for current requirements.
+MIT — see [LICENSE](LICENSE). Synthetic fixture content is original and fictional.

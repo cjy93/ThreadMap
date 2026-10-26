@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-10-25T12:01:03.257Z",
+  "status": "BLOCKED_EXTERNAL",
+  "gate": "A20",
+  "blocker": "No Nebius AI Cloud project access in this environment: no CLI profile/IAM credentials, no registry, Managed PostgreSQL, Object Storage, SecretStash, subnet, CPU preset/quota or infrastructure budget were supplied; installing the Nebius CLI here was not permitted.",
+  "endpoint": {
+    "id": null,
+    "url": null,
+    "region": null,
+    "preset": null,
+    "image": null
+  },
+  "prepared": {
+    "image_build": "local docker build succeeds (image sha256:f9784ff716ad…, ~1.18 GB, base node:24-bookworm-slim@sha256:55fb5f5a…)",
+    "runbook": "deploy/nebius/README.md",
+    "script": "deploy/nebius/deploy.sh (validate|secrets|image|migrate|endpoint|url|bootstrap|owner|verify|restart-test)",
+    "verifier": "scripts/cloud-verify.mjs",
+    "local_rehearsal": {
+      "note": "docker compose on the development laptop; NOT cloud evidence",
+      "origin_bootstrap_gates_sign_in": "PASS",
+      "csrf_untrusted_origin_rejected": "PASS",
+      "demo_isolation": "PASS",
+      "container_recreate_counts_and_sizes_identical": "PASS (snapshot digest 216e21d7…)"
+    }
+  },
+  "checks": {
+    "image_on_regular_cpu_endpoint": "BLOCKED_EXTERNAL",
+    "observed_https_url": "BLOCKED_EXTERNAL",
+    "login_and_demo_from_other_device": "BLOCKED_EXTERNAL",
+    "capture_with_laptop_off_and_browser_closed": "BLOCKED_EXTERNAL",
+    "hosted_worker_real_model_processing": "BLOCKED_EXTERNAL",
+    "endpoint_stop_start_persistence": "BLOCKED_EXTERNAL",
+    "session_restored_without_qr": "BLOCKED_EXTERNAL",
+    "competing_companion_rejected": "BLOCKED_EXTERNAL",
+    "private_route_protection": "BLOCKED_EXTERNAL",
+    "trusted_origin_bootstrap": "BLOCKED_EXTERNAL",
+    "redacted_health": "BLOCKED_EXTERNAL",
+    "outbound_whatsapp_and_token_factory": "BLOCKED_EXTERNAL",
+    "sql_tls_verified": "BLOCKED_EXTERNAL",
+    "object_storage_private": "BLOCKED_EXTERNAL",
+    "hosted_counts_sizes_reconstructed_after_restart": "BLOCKED_EXTERNAL"
+  },
+  "costs": {
+    "estimated": "UNRUN (requires current regional prices)",
+    "observed": "none incurred"
+  }
+}

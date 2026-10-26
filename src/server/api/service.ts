@@ -1,0 +1,408 @@
+// Application API service layer. Route handlers are thin wrappers around these
+// functions so integration tests exercise the exact same authorization,
+// filter, count and projection code. Nothing here calls a model.
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import * as s from '../../db/schema';
+import { loadViewConfig, type ViewConfig } from '../../lib/config';
+import { nodeDiameter } from '../../lib/sizing';
+import type { Db, DbOrTx } from '../db';
+import { nodeContent } from '../graph/content';
+import { chatTotals, computeCounts } from '../graph/counts';
+import { filterFingerprint, matchingMessagesSql, parseContentFilter, parseDisplayDepth, type ContentFilter, type DisplayDepth } from '../graph/filters';
+import { projectMap } from '../graph/projection';
+import { correctPlacement, editTopic, loadTree, pathOf } from '../graph/tree';
+import { createBulkSnapshot, executeBulk, setReview } from '../review';
+import { isUuid, normalizeSearch, SafeError } from '../util';
+
+export interface AuthCtx {
+  userId: string;
+  workspaceId: string;
+  mode: 'private' | 'demo';
+}
+
+let viewCfg: ViewConfig | undefined;
+export const view = () => (viewCfg ??= loadViewConfig());
+
+export async function requireChat(db: DbOrTx, ctx: AuthCtx, chatId: string) {
+  if (!isUuid(chatId)) throw new SafeError('chat not found', 404, 'not_found');
+  const [c] = await db.select().from(s.chats).where(and(eq(s.chats.id, chatId), eq(s.chats.workspaceId, ctx.workspaceId)));
+  if (!c || c.excluded) throw new SafeError('chat not found', 404, 'not_found');
+  return c;
+}
+
+/** Indexed chats with selection state, overall distinct counts and pending analysis. */
+export async function listChats(db: Db, ctx: AuthCtx) {
+  const chats = await db.select().from(s.chats).where(and(eq(s.chats.workspaceId, ctx.workspaceId), eq(s.chats.excluded, false))).orderBy(s.chats.title);
+  const indexed = chats.filter((c) => c.selected || c.taxonomyVersion > 0 || c.sourceVersion > 0);
+  const totals = await chatTotals(db, ctx.userId, ctx.workspaceId, indexed.map((c) => c.id));
+  const jobs = indexed.length
+    ? await db.execute<{ chat_id: string; status: string; n: number }>(sql`
+        SELECT chat_id, status, count(*)::int AS n FROM analysis_jobs
+        WHERE chat_id IN (${sql.join(indexed.map((c) => sql`${c.id}::uuid`), sql`, `)}) AND status IN ('pending','running','budget_paused','failed')
+        GROUP BY chat_id, status`)
+    : { rows: [] };
+  return indexed.map((c) => {
+    const t = totals.get(c.id) ?? { total: 0, missed: 0, pending: 0 };
+    const js = jobs.rows.filter((j) => j.chat_id === c.id);
+    return {
+      id: c.id,
+      title: c.title,
+      kind: c.kind,
+      source: c.sourceKind,
+      selected: c.selected,
+      paused: c.paused,
+      history_mode: c.historyMode,
+      message_count: t.total,
+      missed_count: t.missed,
+      pending_analysis_count: t.pending,
+      analysis: {
+        pending_jobs: js.filter((j) => j.status === 'pending' || j.status === 'running').reduce((n, j) => n + j.n, 0),
+        budget_paused: js.some((j) => j.status === 'budget_paused'),
+        failed: js.some((j) => j.status === 'failed'),
+        last_analysis_at: c.lastAnalysisAt?.toISOString() ?? null,
+      },
+      last_event_at: c.lastEventAt?.toISOString() ?? null,
+    };
+  });
+}
+
+async function effectiveDepth(db: Db, ctx: AuthCtx, chatId: string, urlDepth: DisplayDepth | undefined): Promise<{ depth: DisplayDepth; source: 'url' | 'preference' | 'default' }> {
+  if (urlDepth !== undefined) return { depth: urlDepth, source: 'url' };
+  const [pref] = await db.select().from(s.userChatViewPreferences).where(and(eq(s.userChatViewPreferences.userId, ctx.userId), eq(s.userChatViewPreferences.chatId, chatId)));
+  if (pref) return { depth: parseDisplayDepth(pref.showDepth)!, source: 'preference' };
+  return { depth: view().defaultTopicDepth, source: 'default' };
+}
+
+const idList = (v: string | null) =>
+  (v ?? '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(isUuid)
+    .slice(0, 500);
+
+export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSearchParams) {
+  const chat = await requireChat(db, ctx, chatId);
+  const cfg = view();
+  const filter = parseContentFilter(params, { tz: cfg.defaultTimezone });
+  const urlDepth = parseDisplayDepth(params.get('max_topic_depth'));
+  const { depth, source } = await effectiveDepth(db, ctx, chatId, urlDepth);
+  const collapsed = new Set(idList(params.get('collapsed')));
+  const focus = params.get('focus');
+  const offsets: Record<string, number> = {};
+  for (const part of (params.get('offsets') ?? '').split(',')) {
+    const [id, n] = part.split(':');
+    if (isUuid(id) && /^\d+$/.test(n ?? '')) offsets[id] = Number(n);
+  }
+  // One consistent snapshot for tree, counts and versions.
+  return db.transaction(
+    async (tx) => {
+      const tree = await loadTree(tx, chatId);
+      const counts = await computeCounts(tx, { userId: ctx.userId, workspaceId: ctx.workspaceId, chatId }, filter);
+      const discussions = await tx.select({ id: s.discussions.id, topicId: s.discussions.topicId, title: s.discussions.title }).from(s.discussions).where(eq(s.discussions.chatId, chatId));
+      const [g] = await tx.select({ g: s.chats.graphVersion }).from(s.chats).where(eq(s.chats.id, chatId));
+      const filterActive = filter.status !== 'all' || Boolean(filter.from || filter.to) || filter.topicIds.length > 0;
+      const projection = projectMap({
+        tree,
+        discussions,
+        counts,
+        depth,
+        collapsed,
+        focusId: isUuid(focus) && tree.nodes.has(focus) ? focus : null,
+        childOffsets: offsets,
+        showDiscussions: params.get('discussions') === '1',
+        selectedTopicIds: filter.topicIds,
+        filterActive,
+        view: cfg,
+      });
+      const totals = (await chatTotals(tx, ctx.userId, ctx.workspaceId, [chatId])).get(chatId) ?? { total: 0, missed: 0, pending: 0 };
+      return {
+        chat: { id: chat.id, title: chat.title, kind: chat.kind, source: chat.sourceKind },
+        graph_version: g.g,
+        count_version: counts.countVersion,
+        filter_fingerprint: counts.filterFingerprint,
+        filter,
+        depth_source: source,
+        ...projection,
+        // Logical (unzoomed) diameters derived from server counts with the shared scale.
+        nodes: projection.nodes.map((n) => ({ ...n, diameter: nodeDiameter(n.matching_message_count, cfg.sizing) })),
+        chat_totals: { message_count: totals.total, missed_count: totals.missed, pending_analysis_count: totals.pending },
+      };
+    },
+    { isolationLevel: 'repeatable read', accessMode: 'read only' },
+  );
+}
+
+export async function getNodeContent(db: Db, ctx: AuthCtx, chatId: string, nodeId: string, params: URLSearchParams) {
+  await requireChat(db, ctx, chatId);
+  if (!isUuid(nodeId)) throw new SafeError('node not found', 404, 'not_found');
+  const cfg = view();
+  const filter = parseContentFilter(params, { tz: cfg.defaultTimezone });
+  const tab = params.get('tab') === 'files' ? 'files' : 'messages';
+  const pageSize = Math.min(Math.max(Number(params.get('page_size') ?? cfg.contentPageSize) || cfg.contentPageSize, 1), 200);
+  return db.transaction(
+    async (tx) => {
+      const tree = await loadTree(tx, chatId);
+      const [g] = await tx.select({ g: s.chats.graphVersion }).from(s.chats).where(eq(s.chats.id, chatId));
+      const res = await nodeContent(tx, { userId: ctx.userId, workspaceId: ctx.workspaceId, chatId }, tree, g.g, filter, { nodeId, tab, cursor: params.get('cursor'), pageSize });
+      const summary = await nodeSummary(tx, chatId, nodeId, filter, params.get('full_summary') === '1');
+      return { ...res, summary };
+    },
+    { isolationLevel: 'repeatable read', accessMode: 'read only' },
+  );
+}
+
+/**
+ * Grounded summary claims for a node's own discussions. Prose summarizing the
+ * whole topic is hidden when content filters narrow its input set, unless the
+ * user explicitly asks for the full-topic summary (labeled with its coverage).
+ */
+async function nodeSummary(db: DbOrTx, chatId: string, nodeId: string, filter: ContentFilter, full: boolean) {
+  const narrowed = filter.status !== 'all' || Boolean(filter.from || filter.to) || filter.topicIds.length > 0;
+  const claims = await db.execute<{ id: string; text: string; evidence: { m: string; r: number }[]; inputs: number }>(sql`
+    SELECT c.id, c.text, jsonb_array_length(c.input_message_ids) AS inputs,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('m', e.message_id, 'r', e.revision)) FROM claim_evidence e WHERE e.claim_id = c.id), '[]'::jsonb) AS evidence
+    FROM summary_claims c
+    LEFT JOIN discussions d ON d.id = c.discussion_id
+    WHERE c.chat_id = ${chatId}::uuid AND c.valid AND (c.discussion_id = ${nodeId}::uuid OR d.topic_id = ${nodeId}::uuid)
+    ORDER BY c.created_at LIMIT 20`);
+  const available = claims.rows.length > 0;
+  if (narrowed && !full) {
+    return { coverage: 'hidden_for_filtered_view', available, claims: [] as typeof claims.rows, note: 'Summary covers all dates and review states; open "View full-topic summary" to see it.' };
+  }
+  return { coverage: 'full_topic', available, claims: claims.rows, note: null };
+}
+
+export async function getMessage(db: Db, ctx: AuthCtx, messageId: string) {
+  if (!isUuid(messageId)) throw new SafeError('message not found', 404, 'not_found');
+  const [m] = await db.select().from(s.messages).where(and(eq(s.messages.id, messageId), eq(s.messages.workspaceId, ctx.workspaceId)));
+  if (!m) throw new SafeError('message not found', 404, 'not_found');
+  const chat = await requireChat(db, ctx, m.chatId);
+  const tree = await loadTree(db, m.chatId);
+  const placements = await db.select({ topicId: s.placements.topicId, discussionId: s.placements.discussionId, isPrimary: s.placements.isPrimary }).from(s.placements).where(eq(s.placements.messageId, m.id));
+  const atts = await db.select().from(s.attachments).where(eq(s.attachments.messageId, m.id)).orderBy(s.attachments.ordinal);
+  const [rs] = await db.select().from(s.reviewState).where(and(eq(s.reviewState.userId, ctx.userId), eq(s.reviewState.messageId, m.id)));
+  const ctxRows = m.sentAt
+    ? await db.execute<{ id: string; sender_label: string; body: string | null; sent_at: Date | null; kind: string; state: string }>(sql`
+        (SELECT id, sender_label, body, sent_at, kind, state FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) < (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at DESC, id DESC LIMIT 3)
+        UNION ALL
+        (SELECT id, sender_label, body, sent_at, kind, state FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) > (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at, id LIMIT 3)`)
+    : { rows: [] };
+  const isRead = rs?.status === 'read' && rs.reviewedRevision === m.contentRevision;
+  const tombstoned = m.state !== 'active';
+  return {
+    message_id: m.id,
+    chat: { id: chat.id, title: chat.title, kind: chat.kind },
+    sender: m.senderLabel,
+    direction: m.direction,
+    kind: m.kind,
+    state: m.state,
+    body: tombstoned ? null : m.body,
+    marker: m.kind === 'unsupported' ? 'Unsupported message type (content not captured)' : m.kind === 'system' ? 'System event' : tombstoned ? `Message ${m.state}` : null,
+    sent_at: m.sentAt?.toISOString() ?? null,
+    received_at: m.receivedAt.toISOString(),
+    edited_at: m.editedAt?.toISOString() ?? null,
+    content_revision: m.contentRevision,
+    review: isRead ? 'read' : 'missed',
+    reviewable: !tombstoned && (m.kind === 'text' || m.kind === 'media'),
+    topic_paths: placements.filter((p) => tree.nodes.has(p.topicId)).map((p) => ({ primary: p.isPrimary, path: pathOf(tree, p.topicId) })),
+    attachments: tombstoned
+      ? []
+      : atts.map((a) => ({ id: a.id, media_type: a.mediaType, mime: a.detectedMime ?? a.declaredMime, filename: a.filename, size: a.byteCount ?? a.declaredSize, availability: a.availability })),
+    context: ctxRows.rows
+      .sort((a, b) => (a.sent_at && b.sent_at ? new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime() : 0))
+      .map((c) => ({ message_id: c.id, sender: c.sender_label, snippet: c.state === 'active' ? (c.body ?? '').slice(0, 200) : null, sent_at: c.sent_at ? new Date(c.sent_at).toISOString() : null, label: 'Context outside current filter' })),
+    route: `/chats/${m.chatId}/messages/${m.id}`,
+  };
+}
+
+export async function putViewPreferences(db: Db, ctx: AuthCtx, chatId: string, body: unknown) {
+  await requireChat(db, ctx, chatId);
+  const b = (body ?? {}) as { show_depth?: unknown; auto_read?: unknown; collapsed?: unknown };
+  const depth = parseDisplayDepth(typeof b.show_depth === 'number' ? String(b.show_depth) : typeof b.show_depth === 'string' ? b.show_depth : undefined);
+  if (depth === undefined) throw new SafeError('show_depth must be a nonnegative integer or "all"');
+  const collapsed = Array.isArray(b.collapsed) ? (b.collapsed as unknown[]).filter(isUuid).slice(0, 500) : undefined;
+  const [row] = await db
+    .insert(s.userChatViewPreferences)
+    .values({ userId: ctx.userId, chatId, showDepth: String(depth), autoReadEnabled: b.auto_read === undefined ? true : Boolean(b.auto_read), collapsedNodeIds: collapsed ?? [] })
+    .onConflictDoUpdate({
+      target: [s.userChatViewPreferences.userId, s.userChatViewPreferences.chatId],
+      set: {
+        showDepth: String(depth),
+        ...(b.auto_read === undefined ? {} : { autoReadEnabled: Boolean(b.auto_read) }),
+        ...(collapsed ? { collapsedNodeIds: collapsed } : {}),
+        revision: sql`${s.userChatViewPreferences.revision} + 1`,
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning();
+  return { show_depth: parseDisplayDepth(row.showDepth), auto_read: row.autoReadEnabled, revision: row.revision };
+}
+
+export async function getViewPreferences(db: Db, ctx: AuthCtx, chatId: string) {
+  await requireChat(db, ctx, chatId);
+  const [row] = await db.select().from(s.userChatViewPreferences).where(and(eq(s.userChatViewPreferences.userId, ctx.userId), eq(s.userChatViewPreferences.chatId, chatId)));
+  return { show_depth: row ? parseDisplayDepth(row.showDepth) : view().defaultTopicDepth, auto_read: row?.autoReadEnabled ?? true, saved: Boolean(row) };
+}
+
+export async function reviewOne(db: Db, ctx: AuthCtx, body: unknown) {
+  const b = (body ?? {}) as { message_id?: unknown; status?: unknown; revision?: unknown; source?: unknown };
+  if (!isUuid(b.message_id) || (b.status !== 'read' && b.status !== 'missed') || !Number.isSafeInteger(b.revision)) throw new SafeError('invalid review request');
+  return setReview(db, ctx, { messageId: b.message_id, status: b.status, observedRevision: b.revision as number, source: b.source === 'dwell' ? 'dwell' : 'manual' });
+}
+
+export async function bulkPreview(db: Db, ctx: AuthCtx, chatId: string, body: unknown) {
+  await requireChat(db, ctx, chatId);
+  const b = (body ?? {}) as { node_id?: unknown; filter?: Record<string, string> };
+  const filter = parseContentFilter(new URLSearchParams(b.filter ?? {}), { tz: view().defaultTimezone });
+  const nodeId = isUuid(b.node_id) ? b.node_id : null;
+  return createBulkSnapshot(db, ctx, chatId, nodeId, filter);
+}
+
+export async function bulkExecute(db: Db, ctx: AuthCtx, body: unknown) {
+  const b = (body ?? {}) as { snapshot_id?: unknown; target?: unknown };
+  if (!isUuid(b.snapshot_id) || (b.target !== 'read' && b.target !== 'missed')) throw new SafeError('invalid bulk request');
+  return executeBulk(db, ctx, b.snapshot_id, b.target);
+}
+
+export async function patchTopic(db: Db, ctx: AuthCtx, topicId: string, body: unknown) {
+  if (!isUuid(topicId)) throw new SafeError('topic not found', 404, 'not_found');
+  const b = (body ?? {}) as { title?: unknown; parent_id?: unknown; merge_into_id?: unknown; expected_graph_version?: unknown };
+  return db.transaction((tx) =>
+    editTopic(tx, ctx, topicId, {
+      title: typeof b.title === 'string' ? b.title : undefined,
+      parentId: isUuid(b.parent_id) ? b.parent_id : undefined,
+      mergeIntoId: isUuid(b.merge_into_id) ? b.merge_into_id : undefined,
+      expectedGraphVersion: typeof b.expected_graph_version === 'number' ? b.expected_graph_version : undefined,
+    }),
+  );
+}
+
+export async function patchPlacement(db: Db, ctx: AuthCtx, body: unknown) {
+  const b = (body ?? {}) as { message_id?: unknown; add_topic_id?: unknown; remove_topic_id?: unknown };
+  if (!isUuid(b.message_id)) throw new SafeError('invalid placement request');
+  return db.transaction((tx) =>
+    correctPlacement(tx, ctx, { messageId: b.message_id as string, addTopicId: isUuid(b.add_topic_id) ? b.add_topic_id : undefined, removeTopicId: isUuid(b.remove_topic_id) ? b.remove_topic_id : undefined }),
+  );
+}
+
+/** Unicode-aware substring search over text, sender, filename, URL and topic titles, under the shared filters. */
+export async function search(db: Db, ctx: AuthCtx, params: URLSearchParams) {
+  const q = normalizeSearch(params.get('q') ?? '');
+  if (q.length < 1 || q.length > 200) throw new SafeError('search query must be 1–200 characters');
+  const chatParam = params.get('chat');
+  const chats = chatParam ? [await requireChat(db, ctx, chatParam)] : await db.select().from(s.chats).where(and(eq(s.chats.workspaceId, ctx.workspaceId), eq(s.chats.excluded, false)));
+  if (!chats.length) return { query: q, results: [], topics: [] };
+  const filter = parseContentFilter(params, { tz: view().defaultTimezone });
+  const chatIds = chats.map((c) => c.id);
+  const matching = matchingMessagesSql({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds }, filter);
+  const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; sent_at: Date | null; is_read: boolean; content_revision: number }>(sql`
+    WITH mt AS (${matching})
+    SELECT m.id, m.chat_id, m.sender_label, m.body, m.sent_at, mt.is_read, m.content_revision
+    FROM messages m JOIN mt ON mt.id = m.id
+    WHERE m.search_text LIKE ${like}
+       OR m.id IN (SELECT p.message_id FROM placements p JOIN topics t ON t.id = p.topic_id WHERE lower(t.title) LIKE ${like} AND t.workspace_id = ${ctx.workspaceId}::uuid)
+    ORDER BY m.sent_at DESC NULLS LAST, m.id DESC LIMIT 100`);
+  const trees = new Map(await Promise.all(chatIds.map(async (c) => [c, await loadTree(db, c)] as const)));
+  const placementRows = rows.rows.length
+    ? await db.select({ messageId: s.placements.messageId, topicId: s.placements.topicId }).from(s.placements).where(inArray(s.placements.messageId, rows.rows.map((r) => r.id)))
+    : [];
+  const topicHits = [...trees.entries()].flatMap(([chatId, tree]) =>
+    [...tree.nodes.values()].filter((n) => normalizeSearch(n.title).includes(q)).map((n) => ({ chat_id: chatId, topic_id: n.id, path: pathOf(tree, n.id) })),
+  );
+  return {
+    query: q,
+    filter_fingerprint: filterFingerprint({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds }, filter),
+    results: rows.rows.map((r) => {
+      const body = r.body ?? '';
+      const idx = normalizeSearch(body).indexOf(q);
+      const start = Math.max(0, idx - 60);
+      return {
+        message_id: r.id,
+        chat_id: r.chat_id,
+        sender: r.sender_label,
+        snippet: body.slice(start, start + 200),
+        sent_at: r.sent_at ? new Date(r.sent_at).toISOString() : null,
+        review: r.is_read ? 'read' : 'missed',
+        content_revision: r.content_revision,
+        topic_paths: placementRows.filter((p) => p.messageId === r.id && trees.get(r.chat_id)?.nodes.has(p.topicId)).map((p) => pathOf(trees.get(r.chat_id)!, p.topicId)),
+        route: `/chats/${r.chat_id}/messages/${r.id}`,
+      };
+    }),
+    topics: topicHits.slice(0, 50),
+  };
+}
+
+/** Resource cards (URLs/files) for matching messages, using the shared filter. */
+export async function resourcesFor(db: Db, ctx: AuthCtx, chatId: string, params: URLSearchParams) {
+  await requireChat(db, ctx, chatId);
+  const filter = parseContentFilter(params, { tz: view().defaultTimezone });
+  const matching = matchingMessagesSql({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds: [chatId] }, filter);
+  const r = await db.execute<{ id: string; kind: string; url: string | null; label: string | null; message_id: string; attachment_id: string | null }>(sql`
+    WITH mt AS (${matching})
+    SELECT r.id, r.kind, r.url, r.label, r.message_id, r.attachment_id FROM resources r JOIN mt ON mt.id = r.message_id
+    WHERE r.chat_id = ${chatId}::uuid ORDER BY r.created_at DESC LIMIT 500`);
+  return { items: r.rows, message_ids: [...new Set(r.rows.map((x) => x.message_id))] };
+}
+
+/** Up to five verified, non-dismissed related items for a topic (either side). */
+export async function related(db: Db, ctx: AuthCtx, topicId: string) {
+  if (!isUuid(topicId)) throw new SafeError('topic not found', 404, 'not_found');
+  const [topic] = await db.select().from(s.topics).where(and(eq(s.topics.id, topicId), eq(s.topics.workspaceId, ctx.workspaceId)));
+  if (!topic) throw new SafeError('topic not found', 404, 'not_found');
+  const links = await db
+    .select()
+    .from(s.crossChatLinks)
+    .where(and(eq(s.crossChatLinks.workspaceId, ctx.workspaceId), eq(s.crossChatLinks.status, 'verified'), eq(s.crossChatLinks.dismissed, false), or(eq(s.crossChatLinks.aTopicId, topicId), eq(s.crossChatLinks.bTopicId, topicId))))
+    .orderBy(desc(s.crossChatLinks.createdAt))
+    .limit(5);
+  const out = [];
+  for (const l of links) {
+    const ta = await loadTree(db, l.aChatId);
+    const tb = await loadTree(db, l.bChatId);
+    const [ca] = await db.select({ title: s.chats.title }).from(s.chats).where(eq(s.chats.id, l.aChatId));
+    const [cb] = await db.select({ title: s.chats.title }).from(s.chats).where(eq(s.chats.id, l.bChatId));
+    const ev = async (list: { messageId: string; revision: number }[]) => {
+      if (!list.length) return [];
+      const rows = await db.select({ id: s.messages.id, body: s.messages.body, rev: s.messages.contentRevision, state: s.messages.state, sender: s.messages.senderLabel, chatId: s.messages.chatId }).from(s.messages).where(inArray(s.messages.id, list.map((x) => x.messageId)));
+      // Evidence must still be the analyzed, current revision.
+      return rows.filter((r) => r.state === 'active' && list.some((x) => x.messageId === r.id && x.revision === r.rev)).map((r) => ({ message_id: r.id, sender: r.sender, snippet: (r.body ?? '').slice(0, 200), route: `/chats/${r.chatId}/messages/${r.id}` }));
+    };
+    out.push({
+      link_id: l.id,
+      relation_type: l.relationType,
+      reason: l.reason,
+      a: { chat_id: l.aChatId, chat_title: ca?.title, topic_id: l.aTopicId, path: ta.nodes.has(l.aTopicId) ? pathOf(ta, l.aTopicId) : [], evidence: await ev(l.aEvidence) },
+      b: { chat_id: l.bChatId, chat_title: cb?.title, topic_id: l.bTopicId, path: tb.nodes.has(l.bTopicId) ? pathOf(tb, l.bTopicId) : [], evidence: await ev(l.bEvidence) },
+    });
+  }
+  return { topic_id: topicId, related: out.filter((x) => x.a.evidence.length && x.b.evidence.length) };
+}
+
+export async function dismissLink(db: Db, ctx: AuthCtx, linkId: string) {
+  if (!isUuid(linkId)) throw new SafeError('link not found', 404, 'not_found');
+  const r = await db
+    .update(s.crossChatLinks)
+    .set({ dismissed: true, dismissedBy: ctx.userId, updatedAt: sql`now()` })
+    .where(and(eq(s.crossChatLinks.id, linkId), eq(s.crossChatLinks.workspaceId, ctx.workspaceId)))
+    .returning({ id: s.crossChatLinks.id });
+  if (!r.length) throw new SafeError('link not found', 404, 'not_found');
+  return { dismissed: true };
+}
+
+export async function jobStatus(db: Db, ctx: AuthCtx, jobId: string) {
+  if (!isUuid(jobId)) throw new SafeError('job not found', 404, 'not_found');
+  const [j] = await db.select().from(s.analysisJobs).where(and(eq(s.analysisJobs.id, jobId), eq(s.analysisJobs.workspaceId, ctx.workspaceId)));
+  if (!j) throw new SafeError('job not found', 404, 'not_found');
+  const [ledger] = await db.select().from(s.budgetLedger).where(eq(s.budgetLedger.logicalJobId, j.logicalJobId));
+  return {
+    id: j.id,
+    kind: j.kind,
+    status: j.status,
+    attempts: j.attempts,
+    safe_error: j.safeError,
+    created_at: j.createdAt.toISOString(),
+    completed_at: j.completedAt?.toISOString() ?? null,
+    budget: ledger ? { calls_used: ledger.callsUsed, max_calls: ledger.maxCalls, usd_used: ledger.usdMicrosUsed / 1e6, max_usd: ledger.maxUsdMicros / 1e6 } : null,
+  };
+}

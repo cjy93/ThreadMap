@@ -1,0 +1,48 @@
+{
+  "local-wsl-docker": {
+    "label": "local-wsl-docker",
+    "generated_at": "2026-10-25T11:10:42.156Z",
+    "database": "postgres://***@127.0.0.1:5432/tm_perf",
+    "messages": 10000,
+    "topics": 1011,
+    "max_depth": 8,
+    "widest_branch_children": 41,
+    "runs_per_operation": 30,
+    "results": {
+      "map_all_depth2": {
+        "p50_ms": 315,
+        "p95_ms": 346.3,
+        "max_ms": 349.3
+      },
+      "map_missed_all_levels": {
+        "p50_ms": 67.8,
+        "p95_ms": 72.1,
+        "max_ms": 72.7
+      },
+      "map_date_topic_missed": {
+        "p50_ms": 27.8,
+        "p95_ms": 29.8,
+        "max_ms": 29.9
+      },
+      "content_root_first_page": {
+        "p50_ms": 125.7,
+        "p95_ms": 131.5,
+        "max_ms": 139.9
+      },
+      "content_deep_first_page": {
+        "p50_ms": 13.3,
+        "p95_ms": 17.4,
+        "max_ms": 18.4
+      },
+      "layout_200_nodes": {
+        "p50_ms": 0.08,
+        "p95_ms": 0.24,
+        "visible_nodes": 200,
+        "overlaps": 0,
+        "min_d": 64,
+        "max_d": 220,
+        "ref_max": 220
+      }
+    }
+  }
+}

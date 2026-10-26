@@ -1,0 +1,61 @@
+# ThreadMap implementation decisions
+
+Recorded during implementation (25 Oct 2026). Each entry states the decision and why.
+
+## Stack and versions
+
+- **Node 24.14.1** (local) / `node:24-bookworm-slim` (image). **Next.js 16.4.3**, React 19.3.1, **TypeScript 5.9.3** (TS 7 native compiler not used: Next's type-check integration expects the TS 5 API).
+- **Baileys `7.0.0-rc14`** (npm `latest` dist-tag at implementation time; the 7.x line carries LID/PN alias support required by the spec; `legacy` is 6.7.24). Event shapes verified against `node_modules/baileys/lib/Types/Events.d.ts` and `Utils/process-message.js` of the pinned build: revocations and edits arrive as `messages.update` (`messageStubType: 1` / `editedMessage`), so the normalizer handles both those and protocol messages inside upserts/history.
+- **pg-boss 12.38.0**, **Better Auth 1.7.12** (Drizzle adapter, PostgreSQL sessions, anonymous plugin for demo guests), **Drizzle ORM 0.45.4** + drizzle-kit migrations, Zod 4, @xyflow/react 12, Vitest 5, Playwright 1.64.
+
+## Data model
+
+- **Dedupe identity = (chat, native message id, fromMe).** The participant JID is stored but not part of the identity hash, because the same message can be redelivered addressed by LID or PN; WhatsApp message IDs are random per sender. Aliases are resolved separately (`participant_aliases`, `chat_aliases`) from authoritative `lid-mapping.update` / `remoteJidAlt` / `participantAlt` only.
+- **Recursive topics:** one `topics` table with `parent_id`; depth derived from ancestry. Database trigger rejects self-parenting, cross-chat/root parents, retired parents and ancestor cycles (defense in depth beyond the application checks); a partial unique index enforces exactly one CATEGORY per root per chat. Taxonomy mutations lock the chat row so two concurrent valid-looking moves cannot combine into a cycle.
+- **Graph versions:** publication is a single transaction that writes topics/placements/claims and bumps `chats.graph_version` (the atomic current pointer). Readers use REPEATABLE READ snapshots for tree + counts + versions. Full copy-on-write graph history was not implemented; the previous topology remains served until the publishing transaction commits, and stale claims/links are suppressed immediately on edit/revoke.
+- **Counts:** computed per request with a recursive closure CTE over live topics joined to placements and the shared `matchingMessagesSql` filter — never by summing children. `count_version = g<graph>.s<source>.r<user review>`; `filter_fingerprint` hashes user + workspace + chats + content filter (not depth/pagination). Measured p95 ≤ 0.35 s at 10,000 messages / 1,011 topics, so no count cache was added (a cache would need the same keys).
+- **Edited messages** keep their placements (membership) but become Missed for the new revision; claims and links citing them are invalidated immediately; the new revision is re-queued for analysis.
+- **Merges** retire the topic (`retired_into`) and keep a transitive `topic_merge_map`, so saved filters/links resolve to the survivor.
+
+## Analysis pipeline
+
+- **Microbatch extraction (Nano)** per ≤60 messages / ≈0.6 × input-token cap, with 10 preceding context messages that may not be assigned. Uncovered messages get one retry, then a visible "Unclassified messages / Needs review" unit.
+- **Initial taxonomy (Ultra)** is debounced until no extraction for the chat is pending, then proposes a flat node list (max 40 nodes/call). Nodes flagged `may_subdivide` with ≥2 direct units become **refinement frontiers**; each frontier is a `refine` job sharing the originating `logical_job_id` and therefore the same `budget_ledger` row. Budget exhaustion marks the frontier `budget_paused`; `POST /api/jobs/:id/retry` (or `resumePausedFrontiers`) resumes it without resetting caps.
+- **Single-child chains:** refinement requires ≥2 units, so a branch holding a single discussion is not subdivided further (spec: avoid redundant single-child chains). The fixture content was adjusted accordingly (e.g., *Event planning* holds the *Venue logistics* discussion rather than a one-child *Venue* topic).
+- **Secondary placements** (a message also belonging elsewhere, e.g. a link under Resources) are validated like unit assignments and follow refinement.
+- **JSON mode:** `json_object` by default; `json_schema` only for roles listed in `NEBIUS_JSON_SCHEMA_ROLES` after `models:discover` capability-tests them. Reasoning traces (`<think>`) are stripped before parsing; Zod validation always applies; one Super repair call per invalid output.
+- **Fixture provider** answers from the manifest and emulates bounded output (≤2 new levels per call) so the real frontier machinery is exercised. Its runs are recorded with `provider='fixture'` and its placements with `provenance='fixture'`; it can never satisfy A18.
+- Long bodies are truncated to 1,200 characters in prompts (marked `[truncated]`) rather than sliced into offset-bearing analysis slices; the intact source is always preserved. Recorded as a limitation.
+
+## WhatsApp companion
+
+- Auth state: AES-256-GCM per record with AAD `account|category|id`; creds and every Signal key category persisted through `keys.set`; wrong/missing key ⇒ `relink_required`, never a new key.
+- Lease: session-scoped `pg_try_advisory_lock` on a dedicated connection **plus** a lease row with a monotonically increasing fencing token (expired, never deleted, on release). Auth writes and source ingestion check the fence inside their transactions; lease loss closes the socket.
+- QR: delivered via `pg_notify('tm_qr')` (not durable, not logged) → web memory (≤120 s) → owner-only SSE notice → owner-only `GET /api/whatsapp/qr`. Never in command payloads or logs.
+- `markOnlineOnConnect=false`; no `sendMessage`, `readMessages` or receipt calls anywhere in the codebase.
+- A different WhatsApp account linking to an existing workspace is refused (`account_fingerprint` = SHA-256 of the account user id).
+
+## Web, auth and origin
+
+- `PUBLIC_ORIGIN_MODE=database_bootstrap`: until `runtime_settings` has a row for `DEPLOYMENT_ID`, Better Auth is not constructed, sign-in/pairing return 503 and `/api/health/ready` reports `origin_configured:false`. Host/forwarded headers are never used. The origin is reloaded every 15 s.
+- Every mutation requires `Origin` == trusted origin (in addition to Better Auth's own checks). Public sign-up is disabled; owners are provisioned by CLI.
+- Demo guests: Better Auth anonymous users, each with an isolated workspace seeded from the labeled fixture replay (≈2 s) and a 24 h expiry. Rate limits: email sign-in 10/min, anonymous 30/min, global 300/min per IP (in-memory; single web process per Endpoint).
+- No Endpoint `--auth token`: the browser authenticates with ThreadMap sessions; a shared Endpoint bearer token would have to live in frontend code, which the spec forbids.
+
+## Deployment
+
+- Admin execution path inside the private network = one-off **Serverless Jobs** from the same image in the same subnet (`migrate`, `apply-grants`, `bootstrap-origin`, `create-owner`). This is an operational use of Jobs, not analysis offload; analysis stays in the Endpoint's pg-boss worker.
+- Only Nebius CLI commands documented on docs.nebius.com are used (`ai endpoint create/get/list/stop/start/delete`, `ai job create/list/logs`, `mysterybox secret create`, `registry configure-helper`, `msp postgresql v1alpha1 cluster get-by-name`). Installing the Nebius CLI in this coding environment was not permitted, so the script has not been executed against a real account.
+
+## UI theme
+
+- Visual design: a dark navy **night** theme and a peach **twilight** light theme, frosted-glass panels, orange glowing primary buttons, Fraunces display headings, Albert Sans body text and Antonio uppercase labels. It is written in our own CSS, taking the general look of a public portfolio site as a reference; no markup, artwork or code was copied.
+- Plain CSS variables in `src/app/globals.css`, not Tailwind: every component already uses semantic class names, so swapping the variables restyles the whole app without rewriting markup or adding a build dependency.
+- `data-theme` on `<html>` is set before first paint by an inline script (`src/ui/theme.ts`): a stored choice wins, otherwise the OS `prefers-color-scheme`; without JavaScript the page uses night. The toggle renders only after hydration (`useSyncExternalStore`), so server and client HTML match.
+- Map node geometry is part of the sizing contract (A16): the theme changes only colours, fills and the selection halo — never border widths, font sizes or diameters. Node fills use the solid `--surface` colour so edges never show through a node.
+- `next/font` downloads the Google fonts at **build** time and self-hosts them, so the running app makes no font requests; the image build needs network access (as `npm ci` already does). The landing-page starfield is CSS-only and is switched off by the existing reduced-motion rule.
+
+## Tooling notes
+
+- ESLint uses `eslint-config-next` (core-web-vitals + typescript). The React Compiler advisory rules `set-state-in-effect` and `preserve-manual-memoization` are warnings (fetch-on-change effects are intentional); all other rules are errors and pass.
+- React Flow disables pointer events on non-selectable nodes; nodes set `pointer-events: all`. The size legend sits bottom-right with `pointer-events: none` so it never blocks map controls (both found by Playwright).

@@ -1,0 +1,47 @@
+{
+  "generated_at": "2026-10-25T12:01:03.256Z",
+  "status": "BLOCKED_EXTERNAL",
+  "gate": "A19",
+  "blocker": "Genuine pairing requires the owner to scan the QR from the HOSTED owner UI on a Nebius Endpoint (A20 prerequisite) and to send harmless test messages manually. No hosted deployment exists yet.",
+  "preparatory_local_observations": {
+    "note": "Local development image only; does NOT satisfy A19.",
+    "baileys_version": "7.0.0-rc14",
+    "companion_reached_whatsapp_and_emitted_qr": true,
+    "qr_delivered_owner_only": {
+      "sse_event": true,
+      "owner_endpoint_png": true,
+      "demo_guest_qr_status": 403,
+      "qr_string_in_logs": false
+    },
+    "pairing_scanned": false,
+    "live_messages_received": 0,
+    "cancelled_with_disconnect": true
+  },
+  "required_owner_actions": [
+    "Complete A20 steps 1-6 (deploy/nebius/README.md) so the hosted owner UI exists",
+    "Sign in on the hosted URL from another device, Connect WhatsApp, scan the QR in WhatsApp > Linked Devices",
+    "Select one test group and one individual chat; leave another chat unselected",
+    "Send and receive harmless test messages, including one attachment, one edit and one delete-for-everyone",
+    "Exercise pause/resume, companion restart and disconnect from the Connect panel"
+  ],
+  "checks": {
+    "qr_pairing": "BLOCKED_EXTERNAL",
+    "selected_group_and_direct": "BLOCKED_EXTERNAL",
+    "unselected_excluded": "BLOCKED_EXTERNAL",
+    "incoming_live_without_refresh": "BLOCKED_EXTERNAL",
+    "phone_sent_live_without_refresh": "BLOCKED_EXTERNAL",
+    "attachment_open": "BLOCKED_EXTERNAL",
+    "real_nemotron_on_fresh_capture": "BLOCKED_EXTERNAL",
+    "ids_and_review_preserved_after_companion_restart_and_replay": "BLOCKED_EXTERNAL",
+    "transient_reconnect_vs_relink": "BLOCKED_EXTERNAL",
+    "pause_resume": "BLOCKED_EXTERNAL",
+    "disconnect_remote_unlink_status": "BLOCKED_EXTERNAL",
+    "controlled_edit_revoke_no_stale_evidence": "BLOCKED_EXTERNAL",
+    "no_whatsapp_read_or_send_calls": "BLOCKED_EXTERNAL"
+  },
+  "static_guarantees": {
+    "sendMessage_calls_in_codebase": 0,
+    "readMessages_calls_in_codebase": 0,
+    "markOnlineOnConnect": false
+  }
+}

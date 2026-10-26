@@ -218,3 +218,23 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ThreadMap local state and secrets (never commit API keys, passwords or WhatsApp sessions)
+.env
+.env.*
+!.env.development.local.example
+.env.live
+.env.live.*
+.env.compose
+*.pem
+*.key
+secrets/
+.data/
+.next/
+dist/
+node_modules/
+test-results/
+playwright-report/
+*.tsbuildinfo
+next-env.d.ts
+deploy/nebius/.state/

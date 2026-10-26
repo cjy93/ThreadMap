@@ -1,0 +1,21 @@
+# Development convenience only; it cannot satisfy the cloud completion gate.
+services:
+  db:
+    image: postgres:17-alpine
+    environment: { POSTGRES_USER: threadmap, POSTGRES_PASSWORD: devpass, POSTGRES_DB: threadmap }
+    ports: ['5433:5432']
+    healthcheck: { test: ['CMD-SHELL', 'pg_isready -U threadmap'], interval: 3s, retries: 20 }
+  migrate:
+    image: threadmap:local
+    depends_on: { db: { condition: service_healthy } }
+    environment: { DATABASE_URL: 'postgres://threadmap:devpass@db:5432/threadmap' }
+    command: ['node', 'dist/cli/migrate.js']
+  app:
+    image: threadmap:local
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    ports: ['3000:3000']
+    env_file: [.env.compose]
+    environment:
+      DATABASE_URL: 'postgres://threadmap:devpass@db:5432/threadmap'
+      COMPANION_DATABASE_URL: 'postgres://threadmap:devpass@db:5432/threadmap'
+      WORKER_DATABASE_URL: 'postgres://threadmap:devpass@db:5432/threadmap'
