@@ -46,3 +46,20 @@ export function filterParams(f: FilterState): Record<string, string> {
 
 export const qs = (o: Record<string, string | undefined>) =>
   new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== '')) as Record<string, string>).toString();
+
+/**
+ * Leaving deletes the account: WhatsApp is unlinked and every chat, message,
+ * map and photo is removed. Asks first; returns to the landing page.
+ */
+export async function leaveAndDeleteAccount(): Promise<void> {
+  const ok = window.confirm(
+    'Disconnect WhatsApp and delete your ThreadMap data?\n\nYour chat list, stored messages, maps and photos are deleted and ThreadMap is removed from your phone’s Linked Devices. This cannot be undone.',
+  );
+  if (!ok) return;
+  try {
+    await api('/api/account/delete', { method: 'POST' });
+  } finally {
+    await authClient.signOut().catch(() => undefined);
+    window.location.assign('/');
+  }
+}

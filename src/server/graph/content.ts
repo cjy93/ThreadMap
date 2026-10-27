@@ -155,13 +155,15 @@ export async function nodeContent(db: DbOrTx, scope: ContentScope, tree: Tree, g
     filename: string | null;
     size: number | null;
     availability: string;
+    has_preview: boolean;
+    description: string | null;
     sent_at: Date | null;
     sender_label: string;
     topic_ids: string[];
   }>(sql`
     WITH mt AS (${matching}), mem AS (${membership})
     SELECT a.id, a.message_id, a.media_type, COALESCE(a.detected_mime, a.declared_mime) AS mime, a.filename,
-      COALESCE(a.byte_count, a.declared_size) AS size, a.availability, m.sent_at, m.sender_label,
+      COALESCE(a.byte_count, a.declared_size) AS size, a.availability, a.thumbnail IS NOT NULL AS has_preview, a.ai_description AS description, m.sent_at, m.sender_label,
       ARRAY(SELECT p.topic_id::text FROM placements p WHERE p.message_id = m.id ORDER BY p.is_primary DESC, p.topic_id) AS topic_ids
     FROM attachments a JOIN messages m ON m.id = a.message_id JOIN mt ON mt.id = m.id JOIN mem ON mem.message_id = m.id
     WHERE true ${keyset}
@@ -181,6 +183,8 @@ export async function nodeContent(db: DbOrTx, scope: ContentScope, tree: Tree, g
     filename: r.filename,
     size: r.size,
     availability: r.availability,
+    has_preview: r.has_preview,
+    description: r.description,
     sent_at: r.sent_at ? new Date(r.sent_at).toISOString() : null,
     sender: r.sender_label,
     topic_paths: r.topic_ids.filter((t) => tree.nodes.has(t)).map((t) => pathOf(tree, t)),

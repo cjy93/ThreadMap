@@ -137,7 +137,7 @@ describe('selection, new-only cutoff, history cap and deletion', () => {
     // Explicit reselection re-enables capture with fresh roots.
     await putSelections(t.db, ctx, { selections: [{ chat_id: builders.id, selected: true }] });
     const roots = await t.db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM topics WHERE chat_id = ${builders.id}::uuid`);
-    expect(roots.rows[0].n).toBe(3);
+    expect(roots.rows[0].n).toBe(4);
   });
 
   it('refuses media fetch for revoked/other-workspace attachments', async () => {

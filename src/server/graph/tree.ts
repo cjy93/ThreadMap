@@ -6,11 +6,12 @@ import type { DbOrTx, Tx } from '../db';
 import { notifyChange } from '../notify';
 import { SafeError } from '../util';
 
-export const ROOTS = ['KNOWLEDGE', 'GENERAL_CHAT', 'RESOURCES'] as const;
+export const ROOTS = ['KNOWLEDGE', 'GENERAL_CHAT', 'EVENTS_ACTIVITIES', 'RESOURCES'] as const;
 export type RootEnum = (typeof ROOTS)[number];
 export const ROOT_LABELS: Record<RootEnum, string> = {
   KNOWLEDGE: 'Knowledge',
   GENERAL_CHAT: 'General Chat',
+  EVENTS_ACTIVITIES: 'Events and Activities',
   RESOURCES: 'Resources',
 };
 
@@ -33,7 +34,7 @@ export interface Tree {
   maxDepth: number;
 }
 
-/** Create the three fixed category roots for a chat if missing. */
+/** Create the four fixed category roots for a chat if missing. */
 export async function ensureRoots(db: DbOrTx, workspaceId: string, chatId: string): Promise<void> {
   for (const root of ROOTS) {
     await db.execute(sql`

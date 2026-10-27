@@ -7,7 +7,7 @@ import type { Db, Tx } from '../db';
 import { notifyChange } from '../notify';
 import { attachmentObjectKey, type StorageAdapter } from '../storage';
 import { canonicalUrl, extractUrls, normalizeSearch, sha256 } from '../util';
-import type { AliasEvent, ChatMetaEvent, EditEvent, MessageEvent, NormalizedEvent, RevokeEvent } from './types';
+import type { AliasEvent, ChatMetaEvent, ContactEvent, EditEvent, MessageEvent, NormalizedEvent, RevokeEvent, StarEvent } from './types';
 
 export interface IngestContext {
   workspaceId: string;
@@ -57,7 +57,7 @@ export function revisionDigest(kind: string, body: string | null, attachmentDesc
 }
 
 const eventChatJid = (e: NormalizedEvent): string | null =>
-  e.type === 'message' || e.type === 'edit' || e.type === 'revoke' || e.type === 'chat_meta' ? e.chatJid : null;
+  e.type === 'message' || e.type === 'edit' || e.type === 'revoke' || e.type === 'star' || e.type === 'chat_meta' ? e.chatJid : null;
 
 type ChatRow = typeof s.chats.$inferSelect;
 
@@ -85,16 +85,90 @@ export async function findChatByJid(db: Db | Tx, ctx: IngestContext, jid: string
   return direct[0];
 }
 
+// Direct chats are named, in order of preference: the owner's saved contact
+// name, the person's own WhatsApp name, their phone number.
+// "Unknown contact": WhatsApp addresses the person by a hidden ID (@lid) and gave no name.
+export const DIRECT_PLACEHOLDER = 'Unknown contact';
+export const LEGACY_DIRECT_PLACEHOLDER = 'Direct chat';
+const isUnknownTitle = (t: string) => t === DIRECT_PLACEHOLDER || t === LEGACY_DIRECT_PLACEHOLDER;
+// WhatsApp's number privacy sends titles like "+65∙∙∙∙∙∙25": a number, not a name.
+const isPlaceholderTitle = (t: string) => isUnknownTitle(t) || /^\+\d+$/.test(t) || /^\+\d*[∙•·]+\d*$/.test(t);
+
+function phoneTitle(...jids: (string | null | undefined)[]): string | null {
+  const pn = jids.find((j) => j?.endsWith('@s.whatsapp.net'));
+  const digits = pn?.split('@')[0];
+  return digits && /^\d+$/.test(digits) ? `+${digits}` : null;
+}
+
+async function knownName(db: Db | Tx, ctx: IngestContext, jids: string[]): Promise<string | null> {
+  const [row] = await db
+    .select({ name: s.participants.displayName })
+    .from(s.participantAliases)
+    .innerJoin(s.participants, eq(s.participants.id, s.participantAliases.participantId))
+    .where(and(eq(s.participantAliases.workspaceId, ctx.workspaceId), inArray(s.participantAliases.aliasJid, jids), sql`${s.participants.displayName} !~ '^\\+?[0-9 ∙•·-]+$'`))
+    .limit(1);
+  return row?.name ?? null;
+}
+
+async function setDirectTitle(db: Db | Tx, chat: ChatRow, title: string) {
+  if (chat.title === title) return;
+  await db.update(s.chats).set({ title }).where(eq(s.chats.id, chat.id));
+}
+
+/** Remember a contact's name and apply it to their direct chat if one exists. */
+async function applyContact(db: Db, ctx: IngestContext, ev: ContactEvent) {
+  const jids = [ev.jid, ev.altJid].filter((j): j is string => Boolean(j));
+  await db.transaction(async (tx) => {
+    const [found] = await tx
+      .select({ id: s.participantAliases.participantId })
+      .from(s.participantAliases)
+      .where(and(eq(s.participantAliases.workspaceId, ctx.workspaceId), inArray(s.participantAliases.aliasJid, jids)))
+      .limit(1);
+    // A saved name always wins; a self-chosen name only fills a gap.
+    const display = ev.name ? sql`${ev.name}` : sql`COALESCE(${s.participants.displayName}, ${ev.pushName})`;
+    let pid = found?.id;
+    if (pid) await tx.update(s.participants).set({ displayName: display }).where(eq(s.participants.id, pid));
+    else {
+      const [p] = await tx
+        .insert(s.participants)
+        .values({ workspaceId: ctx.workspaceId, canonicalJid: ev.jid, displayName: ev.name ?? ev.pushName })
+        .onConflictDoUpdate({ target: [s.participants.workspaceId, s.participants.canonicalJid], set: { displayName: display } })
+        .returning({ id: s.participants.id });
+      pid = p.id;
+    }
+    for (const j of jids) await tx.insert(s.participantAliases).values({ workspaceId: ctx.workspaceId, aliasJid: j, participantId: pid, source: 'contact' }).onConflictDoNothing();
+  });
+  let chat: ChatRow | undefined;
+  for (const j of jids) chat ??= await findChatByJid(db, ctx, j);
+  if (!chat || chat.kind !== 'direct') return;
+  if (ev.name) await setDirectTitle(db, chat, ev.name);
+  else if (ev.pushName && isPlaceholderTitle(chat.title)) await setDirectTitle(db, chat, ev.pushName);
+}
+
 /** Record minimal discovery metadata (identity/title/type only, never content). */
 export async function upsertDiscoveredChat(db: Db | Tx, ctx: IngestContext, ev: ChatMetaEvent): Promise<ChatRow> {
   const existing = (await findChatByJid(db, ctx, ev.chatJid)) ?? (ev.chatJidAlt ? await findChatByJid(db, ctx, ev.chatJidAlt) : undefined);
+  const activity = ev.lastActivitySec ? new Date(ev.lastActivitySec * 1000) : null;
+  // A masked or bare number from WhatsApp never replaces a real name for a person.
+  const weakTitle = ev.kind === 'direct' && ev.title !== null && isPlaceholderTitle(ev.title);
   if (existing) {
-    if (ev.title && ev.title !== existing.title) {
+    if (ev.title && ev.title !== existing.title && !(weakTitle && !isPlaceholderTitle(existing.title))) {
       await db.update(s.chats).set({ title: ev.title }).where(eq(s.chats.id, existing.id));
+    }
+    if (activity && (!existing.lastEventAt || existing.lastEventAt < activity)) {
+      await db.update(s.chats).set({ lastEventAt: sql`GREATEST(${s.chats.lastEventAt}, ${activity})` }).where(eq(s.chats.id, existing.id));
     }
     if (ev.chatJidAlt) await addChatAlias(db, ctx, existing.id, ev.chatJidAlt, 'native_alt');
     return { ...existing, title: ev.title ?? existing.title };
   }
+  const fallback =
+    ev.kind === 'group'
+      ? 'Unnamed group'
+      : // A masked title is kept rather than revealing the number WhatsApp chose to hide.
+        ((await knownName(db, ctx, [ev.chatJid, ev.chatJidAlt].filter((j): j is string => Boolean(j)))) ??
+        (weakTitle ? ev.title : null) ??
+        phoneTitle(ev.chatJid, ev.chatJidAlt) ??
+        DIRECT_PLACEHOLDER);
   const [row] = await db
     .insert(s.chats)
     .values({
@@ -103,7 +177,8 @@ export async function upsertDiscoveredChat(db: Db | Tx, ctx: IngestContext, ev: 
       sourceKind: ctx.sourceKind,
       nativeJid: ev.chatJid,
       kind: ev.kind,
-      title: ev.title ?? (ev.kind === 'group' ? 'Unnamed group' : 'Direct chat'),
+      title: weakTitle ? fallback : (ev.title ?? fallback),
+      lastEventAt: activity,
     })
     .onConflictDoUpdate({
       target: [s.chats.workspaceId, s.chats.sourceKind, s.chats.linkedAccountId, s.chats.nativeJid],
@@ -186,6 +261,12 @@ async function applyAlias(tx: Tx, ctx: IngestContext, ev: AliasEvent) {
           .set({ warnings: sql`${s.syncCoverage.warnings} || ${JSON.stringify([{ type: 'alias_conflict', at: new Date().toISOString() }])}::jsonb` })
           .where(eq(s.syncCoverage.chatId, chat.id));
       }
+      // Knowing the number behind a hidden ID lets a saved contact name apply.
+      const [current] = await tx.select().from(s.chats).where(eq(s.chats.id, chat.id));
+      if (isPlaceholderTitle(current.title)) {
+        const name = (await knownName(tx, ctx, [ev.pn, ev.lid])) ?? (isUnknownTitle(current.title) ? phoneTitle(ev.pn) : null);
+        if (name) await setDirectTitle(tx, current, name);
+      }
     }
   }
 }
@@ -201,7 +282,9 @@ function buildSearchText(body: string | null, sender: string, filenames: (string
 async function bumpSource(tx: Tx, chatId: string): Promise<number> {
   const [r] = await tx
     .update(s.chats)
-    .set({ sourceVersion: sql`${s.chats.sourceVersion} + 1`, lastEventAt: sql`now()` })
+    // lastEventAt is the newest message's own time (set in ingestEvents), not arrival time:
+    // a history backfill must not make an old chat look new.
+    .set({ sourceVersion: sql`${s.chats.sourceVersion} + 1` })
     .where(eq(s.chats.id, chatId))
     .returning({ v: s.chats.sourceVersion });
   return r.v;
@@ -219,6 +302,18 @@ export async function ingestEvents(db: Db, ctx: IngestContext, events: Normalize
   // Discovery metadata and alias mappings first (content-free).
   for (const e of events) {
     if (e.type === 'chat_meta') await upsertDiscoveredChat(db, ctx, e);
+  }
+  for (const e of events) {
+    if (e.type === 'contact') await applyContact(db, ctx, e);
+  }
+  // A group message carries its sender's own WhatsApp name (WhatsApp shows it as "~Name").
+  // Only that name is kept, for groups selected or not, so people's direct chats can be named.
+  const senders = new Set<string>();
+  for (const e of events) {
+    if (e.type !== 'message' || e.chatKind !== 'group' || e.fromMe || !e.participantJid || !e.senderName || senders.has(e.participantJid)) continue;
+    if (/^\+?[\d\s∙•·-]+$/.test(e.senderName.trim())) continue;
+    senders.add(e.participantJid);
+    await applyContact(db, ctx, { type: 'contact', jid: e.participantJid, altJid: e.participantAltJid, name: null, pushName: e.senderName.trim() });
   }
   const aliases = events.filter((e): e is AliasEvent => e.type === 'alias');
   if (aliases.length) {
@@ -254,6 +349,34 @@ export async function ingestEvents(db: Db, ctx: IngestContext, events: Normalize
         });
       }
     }
+    // Last-message time keeps the chat list in WhatsApp order, selected or not;
+    // only the time is kept for unselected chats, never their content.
+    const newest = list
+      .filter((e): e is MessageEvent => e.type === 'message' && Boolean(e.sentAtSec) && e.kind !== 'system')
+      .reduce<MessageEvent | null>((a, e) => (!a || e.sentAtSec! > a.sentAtSec! ? e : a), null);
+    if (chat && newest) {
+      const ts = newest.sentAtSec!;
+      const at = new Date(ts * 1000);
+      const newerTime = !chat.lastEventAt || chat.lastEventAt < at;
+      // The anchor lets history be requested later if this chat is selected after its history was discarded.
+      const newerAnchor = !chat.historyAnchor || chat.historyAnchor.ts < ts;
+      const historyAnchor = { remoteJid: newest.chatJid, id: newest.nativeId, fromMe: newest.fromMe, participant: newest.participantJid, ts };
+      if (newerTime || newerAnchor) {
+        await db
+          .update(s.chats)
+          .set({ ...(newerTime ? { lastEventAt: sql`GREATEST(${s.chats.lastEventAt}, ${at})` } : {}), ...(newerAnchor ? { historyAnchor } : {}) })
+          .where(eq(s.chats.id, chat.id));
+        chat = { ...chat, ...(newerTime ? { lastEventAt: at } : {}), ...(newerAnchor ? { historyAnchor } : {}) };
+      }
+    }
+    if (chat?.kind === 'direct' && isPlaceholderTitle(chat.title)) {
+      // The other person's own WhatsApp name, carried on their messages.
+      const named = list.find((e): e is MessageEvent => e.type === 'message' && !e.fromMe && Boolean(e.senderName));
+      if (named?.senderName) {
+        await setDirectTitle(db, chat, named.senderName);
+        chat = { ...chat, title: named.senderName };
+      }
+    }
     if (!chat) {
       // Control events for chats we have never seen: nothing durable to protect.
       stats.ignored += list.length;
@@ -272,6 +395,7 @@ export async function ingestEvents(db: Db, ctx: IngestContext, events: Normalize
         if (e.type === 'message') changed = (await applyMessage(tx, ctx, locked, e, stats)) || changed;
         else if (e.type === 'edit') changed = (await applyEdit(tx, ctx, locked, e, stats)) || changed;
         else if (e.type === 'revoke') changed = (await applyRevoke(tx, ctx, locked, e, 'revoked', stats)) || changed;
+        else if (e.type === 'star') changed = (await applyStar(tx, locked, e, stats)) || changed;
       }
       if (changed) {
         const v = await bumpSource(tx, chatId);
@@ -290,10 +414,15 @@ export async function ingestEvents(db: Db, ctx: IngestContext, events: Normalize
 async function applyMessage(tx: Tx, ctx: IngestContext, chat: ChatRow, e: MessageEvent, stats: IngestStats): Promise<boolean> {
   const hash = nativeKeyHash(e.nativeId, e.fromMe);
   const [existing] = await tx
-    .select({ id: s.messages.id, state: s.messages.state, digest: s.messages.revisionDigest, kind: s.messages.kind, body: s.messages.body })
+    .select({ id: s.messages.id, state: s.messages.state, digest: s.messages.revisionDigest, kind: s.messages.kind, body: s.messages.body, starred: s.messages.starred })
     .from(s.messages)
     .where(and(eq(s.messages.chatId, chat.id), eq(s.messages.nativeKeyHash, hash)));
   if (existing) {
+    // A later sync of the same message may carry a star it did not have before.
+    if (e.starred && !existing.starred) {
+      await tx.update(s.messages).set({ starred: true, starredAt: new Date() }).where(eq(s.messages.id, existing.id));
+      return true;
+    }
     // Replay/backfill duplicate: never resurrect a tombstone or overwrite a newer edit.
     if (existing.state !== 'active') stats.staleIgnored++;
     else if (existing.kind === e.kind && (e.body ?? null) !== (existing.body ?? null) && e.kind !== 'system') {
@@ -359,7 +488,8 @@ async function applyMessage(tx: Tx, ctx: IngestContext, chat: ChatRow, e: Messag
     e.senderName,
     e.fromMe,
   );
-  const senderLabel = e.fromMe ? 'You' : (e.senderName ?? 'Unknown sender');
+  // A one-to-one chat's other side is the chat itself when WhatsApp sends no name.
+  const senderLabel = e.fromMe ? 'You' : (e.senderName ?? (chat.kind === 'direct' ? chat.title : 'Unknown sender'));
   const now = ctx.now?.() ?? new Date();
   const expiresAt = e.ephemeralSec && sentAt ? new Date(sentAt.getTime() + e.ephemeralSec * 1000) : null;
   const latestEdit = pendingEdits.at(-1);
@@ -394,6 +524,8 @@ async function applyMessage(tx: Tx, ctx: IngestContext, chat: ChatRow, e: Messag
       replyToNativeId: e.replyToNativeId,
       expiresAt,
       ingestEventType: `${e.origin}:${e.marker ?? e.kind}`,
+      starred: Boolean(e.starred),
+      starredAt: e.starred ? now : null,
     })
     .returning({ id: s.messages.id });
 
@@ -422,6 +554,7 @@ async function applyMessage(tx: Tx, ctx: IngestContext, chat: ChatRow, e: Messag
         availability: a.fixtureAvailability ?? (a.mediaRef || a.fixtureBytesB64 ? 'available' : 'unavailable'),
         viewOnce: a.viewOnce,
         expiresAt,
+        thumbnail: a.thumbnailB64 ? Buffer.from(a.thumbnailB64, 'base64') : null,
       })
       .returning({ id: s.attachments.id });
     if (a.mediaRef && ctx.sealMediaRef) {
@@ -514,6 +647,17 @@ async function recordControl(tx: Tx, ctx: IngestContext, chatId: string, ev: Edi
   return r.length > 0;
 }
 
+/** Star or unstar a stored message, following the phone. */
+async function applyStar(tx: Tx, chat: ChatRow, e: StarEvent, stats: IngestStats): Promise<boolean> {
+  const target = await findTarget(tx, chat.id, e.targetNativeId, e.fromMe);
+  if (!target || target.starred === e.starred) {
+    stats.ignored++;
+    return false;
+  }
+  await tx.update(s.messages).set({ starred: e.starred, starredAt: e.starred ? new Date() : null }).where(eq(s.messages.id, target.id));
+  return true;
+}
+
 async function applyEdit(tx: Tx, ctx: IngestContext, chat: ChatRow, e: EditEvent, stats: IngestStats): Promise<boolean> {
   const target = await findTarget(tx, chat.id, e.targetNativeId, e.fromMe);
   if (!target) {
@@ -589,7 +733,7 @@ export async function tombstoneMessage(tx: Tx, ctx: { storage?: StorageAdapter }
   const atts = await tx.select({ id: s.attachments.id, objectKey: s.attachments.objectKey }).from(s.attachments).where(eq(s.attachments.messageId, messageId));
   await tx
     .update(s.attachments)
-    .set({ availability: 'unavailable', mediaRef: null, objectKey: null, failureReason: state, updatedAt: sql`now()` })
+    .set({ availability: 'unavailable', mediaRef: null, objectKey: null, thumbnail: null, aiDescription: null, aiDescribedBy: null, failureReason: state, updatedAt: sql`now()` })
     .where(eq(s.attachments.messageId, messageId));
   await tx.delete(s.resources).where(eq(s.resources.messageId, messageId));
   await tx.delete(s.placements).where(eq(s.placements.messageId, messageId));

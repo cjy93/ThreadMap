@@ -14,6 +14,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => 'bytea',
@@ -169,7 +170,7 @@ export const connectorCommands = pgTable(
       .notNull()
       .references(() => linkedAccounts.id, { onDelete: 'cascade' }),
     type: text('type', {
-      enum: ['pair', 'pause', 'resume', 'disconnect', 'fetch_media', 'request_history', 'cancel_pair'],
+      enum: ['pair', 'pause', 'resume', 'disconnect', 'delete_account', 'fetch_media', 'fetch_avatars', 'request_history', 'cancel_pair'],
     }).notNull(),
     // Never contains QR payloads or credentials.
     payload: jsonb('payload').notNull().default({}),
@@ -255,6 +256,16 @@ export const chats = pgTable(
     taxonomyVersion: integer('taxonomy_version').notNull().default(0),
     lastEventAt: ts('last_event_at'),
     lastAnalysisAt: ts('last_analysis_at'),
+    // New messages are analysed only while this is in the future: briefly after the chat is
+    // first opened (its history is arriving) and after the owner clicks Refresh.
+    autoAnalyzeUntil: ts('auto_analyze_until'),
+    // WhatsApp profile photo cached in storage (null: none, hidden, or not fetched yet).
+    avatarKey: text('avatar_key'),
+    // When the photo was last looked up; a null means look it up when the chat is shown.
+    avatarCheckedAt: ts('avatar_checked_at'),
+    // Key of the newest message seen (ids and time only, never content), so history can be
+    // requested from WhatsApp for a chat selected after its initial history was discarded.
+    historyAnchor: jsonb('history_anchor').$type<{ remoteJid: string; id: string; fromMe: boolean; participant: string | null; ts: number }>(),
     createdAt: createdAt(),
   },
   (t) => [
@@ -342,6 +353,9 @@ export const messages = pgTable(
     revisionDigest: text('revision_digest').notNull(),
     replyToNativeId: text('reply_to_native_id'),
     expiresAt: ts('expires_at'),
+    // Starred in WhatsApp (synced from the phone; ThreadMap never stars or unstars).
+    starred: boolean('starred').notNull().default(false),
+    starredAt: ts('starred_at'),
     ingestEventType: text('ingest_event_type').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -351,6 +365,7 @@ export const messages = pgTable(
     index('messages_chat_time_idx').on(t.chatId, t.sentAt, t.id),
     index('messages_workspace_idx').on(t.workspaceId),
     index('messages_native_id_idx').on(t.chatId, t.nativeId),
+    index('messages_starred_idx').on(t.chatId).where(sql`${t.starred}`),
   ],
 );
 
@@ -443,6 +458,11 @@ export const attachments = pgTable(
     failureReason: text('failure_reason'),
     viewOnce: boolean('view_once').notNull().default(false),
     expiresAt: ts('expires_at'),
+    // Small JPEG preview WhatsApp embeds in image/video messages (shown before download; a video's frame for VL).
+    thumbnail: bytea('thumbnail'),
+    // What the vision model sees in the image / video frame, fed into categorisation. Purged with the content.
+    aiDescription: text('ai_description'),
+    aiDescribedBy: text('ai_described_by'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -489,9 +509,9 @@ export const topics = pgTable(
     chatId: uuid('chat_id')
       .notNull()
       .references(() => chats.id, { onDelete: 'cascade' }),
-    root: text('root', { enum: ['KNOWLEDGE', 'GENERAL_CHAT', 'RESOURCES'] }).notNull(),
+    root: text('root', { enum: ['KNOWLEDGE', 'GENERAL_CHAT', 'EVENTS_ACTIVITIES', 'RESOURCES'] }).notNull(),
     kind: text('kind', { enum: ['CATEGORY', 'TOPIC'] }).notNull(),
-    // Null only for the three CATEGORY roots.
+    // Null only for the four CATEGORY roots.
     parentId: uuid('parent_id'),
     title: text('title').notNull(),
     aliases: jsonb('aliases').$type<string[]>().notNull().default([]),
@@ -815,7 +835,7 @@ export const modelRuns = pgTable(
     workspaceId: uuid('workspace_id'),
     logicalJobId: uuid('logical_job_id'),
     jobId: uuid('job_id'),
-    role: text('role', { enum: ['reasoning', 'fast', 'balanced'] }).notNull(),
+    role: text('role', { enum: ['reasoning', 'fast', 'balanced', 'vision'] }).notNull(),
     provider: text('provider', { enum: ['nebius', 'fixture'] }).notNull(),
     modelId: text('model_id').notNull(),
     fallback: boolean('fallback').notNull().default(false),
@@ -873,7 +893,7 @@ export const analysisUnits = pgTable(
       .references(() => chats.id, { onDelete: 'cascade' }),
     jobId: uuid('job_id').notNull(),
     unitKey: text('unit_key').notNull(),
-    primaryRoot: text('primary_root', { enum: ['KNOWLEDGE', 'GENERAL_CHAT', 'RESOURCES'] }).notNull(),
+    primaryRoot: text('primary_root', { enum: ['KNOWLEDGE', 'GENERAL_CHAT', 'EVENTS_ACTIVITIES', 'RESOURCES'] }).notNull(),
     topicTerms: jsonb('topic_terms').$type<string[]>().notNull(),
     messageRefs: jsonb('message_refs').$type<{ m: string; r: number }[]>().notNull(),
     summaryBullets: jsonb('summary_bullets').notNull(),

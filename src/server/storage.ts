@@ -20,6 +20,7 @@ function assertKey(key: string) {
 }
 
 export const attachmentObjectKey = (workspaceId: string, attachmentId: string) => `ws/${workspaceId}/att/${attachmentId}`;
+export const avatarObjectKey = (workspaceId: string, chatId: string) => `ws/${workspaceId}/avatar/${chatId}`;
 
 class LocalStorage implements StorageAdapter {
   readonly driver = 'local' as const;

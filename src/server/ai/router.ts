@@ -9,6 +9,9 @@ import { sleep } from '../util';
 import { extractJson, ProviderError, type FixtureHints, type ModelProvider, type Role } from './provider';
 import { PROMPT_VERSION, SCHEMA_VERSION } from './schemas';
 
+/** Retries for a busy provider (429/503/529), however low LLM_MAX_NETWORK_RETRIES is set. */
+const BUSY_RETRIES = 4;
+
 export class BudgetExceededError extends Error {
   constructor(readonly scope: 'job' | 'day') {
     super(`inference budget exhausted (${scope})`);
@@ -99,6 +102,8 @@ export interface ModelCall<T> {
   hints?: FixtureHints;
   /** Override the provider's per-role reasoning default. */
   thinking?: boolean;
+  /** Images for the vision role. */
+  images?: { mime: string; b64: string }[];
 }
 
 export interface ModelCallResult<T> {
@@ -112,7 +117,8 @@ export interface ModelCallResult<T> {
 export async function callModel<T>(deps: RouterDeps, scope: CallScope, call: ModelCall<T>): Promise<ModelCallResult<T>> {
   const { db, provider, cfg } = deps;
   const wait = deps.sleep ?? sleep;
-  const inTokens = estimateTokens(call.system + call.user);
+  // Vision models bill an image at a few hundred tokens (measured: 258 for Nemotron VL).
+  const inTokens = estimateTokens(call.system + call.user) + (call.images?.length ?? 0) * 800;
   if (inTokens > cfg.LLM_MAX_INPUT_TOKENS_PER_CALL * 1.5) {
     throw new InvalidOutputError(`prompt too large (${inTokens} est. tokens); caller must split input`);
   }
@@ -129,7 +135,7 @@ export async function callModel<T>(deps: RouterDeps, scope: CallScope, call: Mod
     calls++;
     deps.onCall?.(role, operation);
     try {
-      const r = await provider.complete({ role, operation, system, user, maxOutputTokens: maxOut, schemaName: call.schemaName, jsonSchema: call.jsonSchema, fixtureHints: call.hints, thinking });
+      const r = await provider.complete({ role, operation, system, user, maxOutputTokens: maxOut, schemaName: call.schemaName, jsonSchema: call.jsonSchema, fixtureHints: call.hints, thinking, images: call.images });
       const actual = p && r.usage.input !== null && r.usage.output !== null ? usdMicros((r.usage.input * p.input + r.usage.output * p.output) / 1_000_000) : est;
       await settle(db, scope.logicalJobId, day, est, actual, { input: r.usage.input ?? 0, output: r.usage.output ?? 0 });
       return { r, started, actual, modelId };
@@ -161,8 +167,10 @@ export async function callModel<T>(deps: RouterDeps, scope: CallScope, call: Mod
       res = await attempt(call.role, call.operation, call.system, call.user, i + 1);
       break;
     } catch (e) {
-      if (e instanceof ProviderError && e.retryable && i < cfg.LLM_MAX_NETWORK_RETRIES) {
-        await wait(Math.min(30_000, 500 * 2 ** i) + Math.floor(Math.random() * 250));
+      // A busy provider (rate limit, overload) gets more tries and longer pauses: 5, 10, 20, 40 s.
+      const busy = e instanceof ProviderError && (e.kind === 'rate_limit' || e.kind === 'overloaded');
+      if (e instanceof ProviderError && e.retryable && i < (busy ? Math.max(cfg.LLM_MAX_NETWORK_RETRIES, BUSY_RETRIES) : cfg.LLM_MAX_NETWORK_RETRIES)) {
+        await wait(busy ? 5_000 * 2 ** i : Math.min(30_000, 500 * 2 ** i) + Math.floor(Math.random() * 250));
         continue;
       }
       throw e;

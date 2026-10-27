@@ -1,7 +1,9 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { loadAppConfig } from '@/lib/config';
 import { getAuth } from '@/server/auth';
-import { SignIn } from '@/ui/SignIn';
+import { RootIcon } from '@/ui/RootIcon';
+import { Start } from '@/ui/Start';
 import { ThemeToggle } from '@/ui/ThemeToggle';
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +22,7 @@ function LandingTop() {
   );
 }
 
-export default async function Home() {
+export default async function Home({ searchParams }: { searchParams: Promise<{ home?: string }> }) {
   const auth = await getAuth();
   if (!auth) {
     return (
@@ -28,12 +30,15 @@ export default async function Home() {
         <LandingTop />
         <div className="kicker">Starting up</div>
         <h1>ThreadMap</h1>
-        <p className="lede">This deployment is starting up: its public origin has not been bootstrapped yet, so sign-in and pairing are disabled.</p>
+        <p className="lede">This deployment is starting up: its public origin has not been bootstrapped yet, so connecting WhatsApp is disabled.</p>
       </main>
     );
   }
   const session = await auth.api.getSession({ headers: await headers() });
-  if (session) redirect('/app');
+  // Signed-in visitors go straight to the app, unless they chose "Home" (signing out would delete their data).
+  const wantsHome = (await searchParams).home === '1';
+  if (session && !wantsHome) redirect('/app');
+  const cfg = loadAppConfig();
   return (
     <main className="landing">
       <LandingTop />
@@ -42,16 +47,26 @@ export default async function Home() {
         Every busy chat, <em>mapped</em> to its sources.
       </h1>
       <p className="lede">
-        Turn busy WhatsApp conversations into navigable knowledge maps. Every chat gets three roots — <strong>Knowledge</strong>, <strong>General Chat</strong> and{' '}
-        <strong>Resources</strong> — with recursively nested topics found by NVIDIA Nemotron. Node size shows how many matching messages a branch holds, and every node opens
-        the exact source messages and files beneath it.
+        Turn busy WhatsApp conversations into navigable knowledge maps. Every chat starts from four roots — <strong>Knowledge</strong>, <strong>General Chat</strong>,{' '}
+        <strong>Events and Activities</strong> and <strong>Resources</strong> — with recursively nested topics found by NVIDIA Nemotron. Find the explanation, the meetup
+        details or the shared link without scrolling: node size shows how many matching messages a branch holds, and every node opens the exact source messages and files
+        beneath it.
       </p>
       <div className="roots" aria-hidden>
-        <span className="pill k">Knowledge</span>
-        <span className="pill g">General Chat</span>
-        <span className="pill r">Resources</span>
+        <span className="pill k">
+          <RootIcon root="KNOWLEDGE" size={22} /> Knowledge
+        </span>
+        <span className="pill g">
+          <RootIcon root="GENERAL_CHAT" size={22} /> General Chat
+        </span>
+        <span className="pill e">
+          <RootIcon root="EVENTS_ACTIVITIES" size={22} /> Events and Activities
+        </span>
+        <span className="pill r">
+          <RootIcon root="RESOURCES" size={22} /> Resources
+        </span>
       </div>
-      <SignIn />
+      <Start pairingEnabled={cfg.WHATSAPP_PAIRING_ENABLED} demoEnabled={cfg.PUBLIC_DEMO_ENABLED} signedIn={Boolean(session)} />
     </main>
   );
 }

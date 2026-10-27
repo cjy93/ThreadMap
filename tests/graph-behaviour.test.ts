@@ -31,7 +31,7 @@ let t: TestDb;
 let ctx: AuthCtx;
 let other: AuthCtx;
 let chats: Record<'builders' | 'study' | 'music', string>;
-const LETTER = { KNOWLEDGE: 'K', GENERAL_CHAT: 'G', RESOURCES: 'R' } as const;
+const LETTER = { KNOWLEDGE: 'K', GENERAL_CHAT: 'G', EVENTS_ACTIVITIES: 'E', RESOURCES: 'R' } as const;
 
 beforeAll(async () => {
   t = await createTestDb();

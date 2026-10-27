@@ -24,15 +24,15 @@ Copy this directory into a new or existing ThreadMap repository as `docs/threadm
 - Keep canonical data, review state, queue state, and encrypted WhatsApp auth in external Nebius Managed PostgreSQL through a private TLS connection. Put files in private Nebius Object Storage and encryption/API keys in SecretStash. Endpoint disk is temporary.
 - Allow one linked WhatsApp account per private workspace. Select which conversations ThreadMap retains and analyzes. This selection is an application filter, not a WhatsApp permission boundary.
 - Receive new incoming and outgoing messages automatically. Offer bounded available-history synchronization and report observed coverage without promising the entire archive.
-- Give every chat exactly three top-level categories: Knowledge, General Chat, and Resources.
+- Give every chat exactly four top-level categories: Knowledge, General Chat, Events and Activities, and Resources.
 - Let Nemotron propose a recursive, content-supported topic hierarchy and inferred discussions, with citations to canonical source messages. Knowledge's suggested first-level subtopics are Programming, Music, Art, and History; deeper branches can continue through Hackathons or School work, then Solutions or Tips, and further supported levels.
-- Use the same recursive hierarchy engine beneath all three roots. There is no hard-coded two-level topic limit; each branch stops when further subdivision would not help explain its source content.
+- Use the same recursive hierarchy engine beneath all four roots. There is no hard-coded two-level topic limit; each branch stops when further subdivision would not help explain its source content.
 - Provide a **Show depth** display control and direct access to a category or topic's matching messages and files, including all deeper descendants. Users do not have to expand to the deepest level to read the content.
 - Size each mindmap node by its distinct matching message count, including all recursive descendants for categories/topics. Use a shared bounded scale and an exact count badge, so large branches are visually recognizable without overwhelming the map.
 - Open exact captured messages and available files inside ThreadMap. Fetch media on demand; show explicit unavailable/pending states.
 - Persist per-user message review state; derive discussion/topic/chat Read and Missed states from it.
 - Include useful links between selected chats, with evidence on both sides.
-- Use Nemotron 3 Ultra for taxonomy reasoning, Nano for routine extraction, and Super for escalation through Nebius Token Factory.
+- Use Nemotron 3 Super for building the topic tree (40-discussion windows), Nano for routine extraction, and Super for escalation through Nebius Token Factory.
 - Keep ThreadMap review status separate from WhatsApp read receipts; provide no message-sending controls.
 - Provide `/demo` through isolated synthetic guest workspaces; demo accounts cannot pair WhatsApp or access the owner's data. A separate demo endpoint is optional. Replayed demonstrations must be labeled as such.
 - Keep optional services out of the critical path.

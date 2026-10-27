@@ -15,6 +15,48 @@
       "when": 1792917739927,
       "tag": "0001_graph_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793024202241,
+      "tag": "0002_chat_avatars",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793024846743,
+      "tag": "0003_chat_history_anchor",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793028037418,
+      "tag": "0004_chat_analysis_window",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793030078291,
+      "tag": "0005_attachment_vision",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793030425028,
+      "tag": "0006_events_root",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793093730300,
+      "tag": "0007_message_starred",
+      "breakpoints": true
     }
   ]
 }

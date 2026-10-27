@@ -29,6 +29,7 @@
   --read: #7fdcae;
   --knowledge: #6e95ff;
   --general: #ff7fae;
+  --events: #ffb454;
   --resources: #4fd1c5;
   --focus: #ffb15c;
   --danger: #ff8a8a;
@@ -62,6 +63,7 @@
   --read: #1f7a4d;
   --knowledge: #1f4fd8;
   --general: #c42a66;
+  --events: #a35a00;
   --resources: #0f7c74;
   --focus: #1f4fd8;
   --danger: #b42318;
@@ -136,7 +138,9 @@ input[type='checkbox'] { accent-color: var(--accent); }
   width: 440px; max-width: 100vw; border-left: 1px solid var(--border); background: var(--header-bg); overflow: auto;
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
 }
-.chatitem { display: block; width: 100%; text-align: left; margin-bottom: 6px; padding: 10px 12px; border-radius: 14px; background: var(--panel); }
+.chatitem { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; margin-bottom: 6px; padding: 10px 12px; border-radius: 14px; background: var(--panel); }
+.chatitem-text { display: flex; flex-direction: column; min-width: 0; }
+.chatitem-text .counts { display: block; }
 .chatitem[aria-current='true'] { border-color: var(--border-strong); background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .counts { font-size: 12px; color: var(--muted); }
 .missed { color: var(--missed); font-weight: 600; }
@@ -147,12 +151,19 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel); }
 .seg button { border-color: transparent; background: transparent; }
 .seg button[aria-pressed='true'] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-.legend {
-  position: absolute; right: 12px; bottom: 12px; pointer-events: none; border-radius: 14px; padding: 10px 12px; font-size: 12px; z-index: 5; max-width: 300px;
-  background: var(--surface); border: 1px solid var(--glass-border); box-shadow: 0 8px 24px var(--glass-shadow);
+.chat-toolbar {
+  position: sticky; top: 0; z-index: 2; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 8px 0; margin-bottom: 4px;
+  background: var(--surface);
 }
-.legend .dots { display: flex; align-items: flex-end; gap: 8px; margin-top: 4px; }
-.legend .dot { border-radius: 50%; border: 2px solid var(--muted); }
+.chat-name { display: flex; align-items: center; gap: 10px; }
+.avatar {
+  flex: none; width: 36px; height: 36px; border-radius: 50%; object-fit: cover; display: inline-grid; place-items: center;
+  font-size: 13px; font-weight: 600; color: var(--text-2); background: var(--accent-soft); border: 1px solid var(--border);
+}
+.map-note {
+  position: absolute; right: 12px; bottom: 12px; pointer-events: none; z-index: 5; padding: 4px 10px; border-radius: 999px; font-size: 12px;
+  color: var(--muted); background: var(--surface); border: 1px solid var(--glass-border);
+}
 .breadcrumbs { position: absolute; left: 12px; top: 10px; z-index: 5; display: flex; gap: 4px; flex-wrap: wrap; }
 .breadcrumbs button { background: var(--header-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 
@@ -167,11 +178,25 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .cnode .body.zero { background: var(--surface); border-style: solid; border-width: 2px; color: var(--muted); box-shadow: none; }
 .cnode .body.unknown { border-style: dashed; color: var(--muted); box-shadow: none; }
 .cnode.selected .body { box-shadow: 0 0 0 5px var(--focus), 0 0 28px var(--focus); }
-.cnode .label { margin-top: 6px; max-width: 190px; text-align: center; font-size: 13px; line-height: 16px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.cnode .badge { font-size: 11px; color: var(--muted); height: 18px; white-space: nowrap; }
+.cnode .body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center; overflow: hidden; }
+.cnode .body .title {
+  color: var(--text); font-weight: 600; line-height: 1.15; overflow: hidden; white-space: normal;
+  /* Long words continue on the next line with a hyphen; words with no hyphenation point still break. */
+  -webkit-hyphens: auto; hyphens: auto; overflow-wrap: break-word;
+  display: -webkit-box; -webkit-box-orient: vertical;
+}
+.cnode .body .count { line-height: 1.1; font-weight: 700; }
+/* Never squeeze a line inside the circle: drop lines instead (see MapView). */
+.cnode .body > * { flex-shrink: 0; }
+.cnode .body .missed, .cnode .body .readbadge { line-height: 1.1; white-space: nowrap; }
+.cnode .deeper { margin-top: 4px; padding: 0 6px; font-size: 11px; height: 18px; }
 .cnode.root-GENERAL_CHAT .body { color: var(--general); }
+.cnode.root-EVENTS_ACTIVITIES .body { color: var(--events); }
 .cnode.root-RESOURCES .body { color: var(--resources); }
-.cnode .deeper { font-size: 11px; color: var(--accent); }
+.cnode .deeper { color: var(--accent); }
+.cnode .deeper[aria-expanded='true'] { color: var(--muted); }
+.map-tools { position: absolute; top: 12px; right: 12px; z-index: 10; display: flex; gap: 6px; }
+.map-tools button { background: var(--surface); }
 .react-flow { --xy-edge-stroke-default: var(--edge); --xy-background-pattern-dots-color-default: var(--dots); --xy-background-color-default: transparent; }
 .react-flow__controls { border-radius: 12px; overflow: hidden; box-shadow: 0 8px 24px var(--glass-shadow); }
 .react-flow__controls-button { background: var(--surface); border-color: var(--border); color: var(--text); fill: var(--text); border-radius: 0; }
@@ -191,7 +216,7 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .dhead { position: sticky; top: 0; background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 14px; z-index: 2; }
 .dbody { padding: 12px 14px; }
 .path { font-size: 12px; color: var(--muted); }
-.msg { border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel); text-align: left; width: 100%; display: block; }
+.msg { white-space: normal; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel); text-align: left; width: 100%; display: block; }
 button.msg:hover { border-color: var(--border-strong); background: var(--panel-2); }
 .msg[aria-current='true'] { border-color: var(--accent); }
 .src { white-space: pre-wrap; word-break: break-word; background: var(--panel-2); border: 1px solid var(--border); padding: 12px; border-radius: 14px; }
@@ -214,9 +239,10 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .landing h1 em { font-style: italic; }
 .landing .lede { max-width: 62ch; font-size: 16px; color: var(--text-2); margin-bottom: 36px; }
 .landing .roots { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 40px; }
-.landing .roots .pill { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.1em; padding: 4px 12px; }
+.landing .roots .pill { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.1em; padding: 4px 12px; display: inline-flex; align-items: center; gap: 8px; }
 .landing .roots .k { color: var(--knowledge); }
 .landing .roots .g { color: var(--general); }
+.landing .roots .e { color: var(--events); }
 .landing .roots .r { color: var(--resources); }
 
 /* Decorative sky behind the landing page (night only). */
@@ -249,3 +275,165 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
   input[type='search'] { min-width: 0; width: 100%; }
   .landing-top { margin-bottom: 32px; }
 }
+/* Attachments shown like WhatsApp: images inline, videos/voice as players. */
+.media-wrap { display: grid; gap: 6px; margin: 6px 0; justify-items: start; }
+.media-wrap .media { display: block; max-width: 100%; max-height: 320px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); }
+.media-wrap .media.preview { filter: blur(1px); opacity: 0.85; }
+.media-wrap audio { width: 100%; max-width: 360px; }
+/* Ask: a chat-style search box and its reply. */
+.askbox { display: flex; gap: 6px; flex: 1; min-width: 260px; }
+.askbox input { flex: 1; min-width: 0; }
+.bubble { padding: 8px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 8px; max-width: 92%; font-size: 14px; }
+.bubble.mine { margin-left: auto; background: var(--accent-soft); }
+.bubble .terms { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+/* The conversation around an opened message, laid out like WhatsApp. */
+.thread { display: flex; flex-direction: column; gap: 6px; }
+.thread .tmsg {
+  display: block; text-align: left; max-width: 85%; padding: 6px 10px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; cursor: pointer;
+}
+.thread .tmsg.mine { align-self: flex-end; background: var(--accent-soft); }
+.thread .tmsg .meta { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+.thread .tmsg.current { cursor: default; border: 2px solid var(--accent); box-shadow: 0 0 0 3px var(--focus); }
+/* Linking by phone number. */
+.linklike { background: none; border: none; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
+.phone-link { display: grid; gap: 8px; max-width: 360px; margin: 8px 0; }
+.phone-link input { width: 100%; }
+.pair-code { font-size: 32px; font-weight: 700; letter-spacing: 0.18em; text-align: center; padding: 12px; border-radius: 12px; border: 2px dashed var(--accent); }
+/* Details panel: the action bar stays put while its content scrolls; a topic's own header sits just below it. */
+.drawer { --drawer-bar-h: 48px; }
+.drawer-bar {
+  position: sticky; top: 0; z-index: 4; height: var(--drawer-bar-h); box-sizing: border-box;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.drawer .dhead { top: var(--drawer-bar-h); }
+/* Ask concept map: typed nodes (question, abstraction, topic, sibling, detail, your concept) on curved edges. */
+.concept {
+  --c: var(--knowledge);
+  width: 240px; display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: 12px;
+  background: color-mix(in srgb, var(--c) 12%, var(--surface)); border: 2px solid var(--c); color: var(--text);
+  box-shadow: 0 6px 18px var(--glass-shadow); font-size: 13px;
+}
+.concept .ctype { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--c); font-weight: 700; }
+.concept .clabel {
+  font-weight: 600; line-height: 1.25; text-align: left; overflow: hidden; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow-wrap: anywhere; background: none; border: none; border-radius: 0; padding: 0; color: inherit; font-size: 13px;
+}
+.concept button.clabel { cursor: pointer; }
+.concept button.clabel:hover { text-decoration: underline; }
+.concept .csub { font-size: 12px; color: var(--muted); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.concept input { width: 100%; font-weight: 600; }
+.concept.k-query { --c: var(--accent); width: 260px; border-width: 3px; }
+.concept.k-abstraction { border-style: dashed; background: var(--surface); }
+.concept.k-topic { border-width: 3px; box-shadow: 0 0 22px color-mix(in srgb, var(--c) 35%, transparent); }
+.concept.k-sibling { border-width: 1px; }
+.concept.k-detail { --c: var(--muted); border-width: 1px; background: var(--surface); font-weight: 400; }
+.concept.k-detail .clabel { font-weight: 400; }
+.concept.k-concept { --c: var(--italic); border-style: dotted; }
+.concept.root-GENERAL_CHAT { --c: var(--general); }
+.concept.root-EVENTS_ACTIVITIES { --c: var(--events); }
+.concept.root-RESOURCES { --c: var(--resources); }
+.react-flow__edge.e-detail path { stroke-dasharray: 4 4; }
+.react-flow__edge.e-concept path { stroke: var(--italic); }
+.react-flow__edge.e-cross path { stroke: var(--accent); stroke-dasharray: 2 5; opacity: 0.8; }
+.react-flow__edge-text { fill: var(--muted); font-size: 11px; }
+.react-flow__edge-textbg { fill: var(--surface); }
+.concept-tools button, .concept-back { background: var(--surface); }
+.concept-tools { position: absolute; top: 12px; right: 12px; z-index: 10; display: flex; gap: 6px; }
+.concept-back { position: absolute; top: 12px; left: 12px; z-index: 10; }
+.concept-legend {
+  position: absolute; left: 60px; bottom: 12px; z-index: 10; display: flex; flex-wrap: wrap; gap: 10px; padding: 6px 10px;
+  border-radius: 10px; background: var(--surface); border: 1px solid var(--border); font-size: 12px; color: var(--text-2);
+}
+.concept-legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 2px solid var(--knowledge); vertical-align: -2px; }
+.concept-legend .sw.k-query { border-color: var(--accent); }
+.concept-legend .sw.k-abstraction { border-style: dashed; }
+.concept-legend .sw.k-sibling { border-width: 1px; }
+.concept-legend .sw.k-detail { border-color: var(--muted); border-width: 1px; }
+.concept-legend .sw.k-concept { border-color: var(--italic); border-style: dotted; }
+.concept-legend .sw.cross { width: 18px; height: 0; border: none; border-top: 2px dashed var(--accent); border-radius: 0; vertical-align: 3px; }
+.concept-minimap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.concept-minimap .mm-query { fill: var(--accent); }
+.concept-minimap .mm-topic { fill: var(--knowledge); }
+.concept-minimap .mm-abstraction, .concept-minimap .mm-sibling { fill: var(--border-strong); }
+.concept-minimap .mm-detail { fill: var(--muted); }
+.concept-minimap .mm-concept { fill: var(--italic); }
+/* Chat list slides away for a bigger map (☰ in the top bar). */
+.shell { transition: grid-template-columns 200ms ease; }
+.shell.nav-hidden { grid-template-columns: 0px 1fr auto; }
+.shell.nav-hidden .left { visibility: hidden; padding: 0; border: none; overflow: hidden; }
+.menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border-radius: 10px; }
+/* On wide screens the toggle is a tab sticking out of the chat list's edge, not a free-floating button. */
+@media (min-width: 901px) {
+  .topbar .menu-btn {
+    width: 22px; height: 52px; margin-left: -15px; margin-right: 4px; border-radius: 0 12px 12px 0;
+    background: var(--header-bg); border: 1px solid var(--border); border-left: none; color: var(--muted);
+    box-shadow: 4px 0 12px var(--glass-shadow);
+  }
+  .topbar .menu-btn:hover { color: var(--text); width: 26px; }
+}
+.manual-btn { margin-left: auto; }
+/* User manual: an in-app panel, and its own page at /manual. */
+.modal-backdrop { position: fixed; inset: 0; z-index: 50; background: color-mix(in srgb, var(--bg) 70%, transparent); display: grid; place-items: center; padding: 16px; }
+.modal { width: min(760px, 100%); max-height: calc(100vh - 32px); overflow: auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 18px; box-shadow: 0 24px 60px var(--glass-shadow); }
+.modal-bar { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 18px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.modal-bar h2 { margin: 0; font-family: var(--font-fraunces), Georgia, serif; font-weight: 400; font-size: 22px; }
+.modal-bar a { color: var(--accent); font-size: 13px; margin-right: 8px; }
+.modal .manual { padding: 4px 18px 18px; }
+.manual { line-height: 1.6; }
+.manual h3 { font-family: var(--font-fraunces), Georgia, serif; font-weight: 400; font-size: 19px; margin: 18px 0 6px; }
+.manual ul, .manual ol { padding-left: 20px; margin: 6px 0; }
+.manual li { margin-bottom: 4px; }
+.manual .manual-roots { list-style: none; padding-left: 0; }
+.manual .manual-roots li { display: flex; align-items: center; gap: 10px; }
+@media (max-width: 900px) {
+  .shell.nav-hidden { grid-template-columns: 1fr; }
+  .shell.nav-hidden .left { display: none; }
+}
+/* A message row: opens on click; missed ones carry a quick "✓ Read" button. */
+.msg.msg-row { display: flex; align-items: flex-start; gap: 8px; padding: 0; }
+.msg-row .msg-open { flex: 1; min-width: 0; text-align: left; background: none; border: none; border-radius: 14px; padding: 10px 12px; white-space: normal; overflow-wrap: anywhere; }
+.msg-row:hover { border-color: var(--border-strong); background: var(--panel-2); }
+.msg-row .mark-read { flex: none; margin: 10px 10px 0 0; padding: 3px 10px; font-size: 12px; color: var(--read); }
+.cite { font-size: 11px; padding: 0 4px; cursor: help; }
+.cite-note { list-style: none; margin-left: -20px; font-size: 12px; }
+.media-wrap .media.sticker { max-width: 160px; max-height: 160px; border: none; background: none; }
+/* Map build progress, or why the map is partial. */
+.build-progress {
+  position: absolute; top: 12px; left: 12px; z-index: 11; width: min(460px, calc(100% - 24px)); display: grid; gap: 6px; padding: 10px 12px;
+  border-radius: 14px; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: 0 8px 24px var(--glass-shadow); font-size: 13px;
+}
+.build-progress.partial { border-color: var(--missed); }
+.build-progress .bp-sub { font-size: 12px; color: var(--muted); }
+.build-progress button { justify-self: start; }
+.bp-bar { height: 8px; border-radius: 999px; background: var(--panel-2); overflow: hidden; }
+.bp-bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 400ms ease; }
+.bp-bar span.busy { background: repeating-linear-gradient(90deg, var(--accent) 0 16px, color-mix(in srgb, var(--accent) 55%, transparent) 16px 32px); background-size: 64px 100%; animation: bp-move 1s linear infinite; }
+@keyframes bp-move { to { background-position: 64px 0; } }
+.pending-status { display: inline-flex; align-items: center; gap: 8px; }
+.pending-status .bp-bar { width: 120px; height: 6px; }
+.build-progress:not(.folded) { cursor: pointer; }
+.build-progress.folded { width: auto; display: inline-flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 999px; font-size: 12px; color: var(--text); }
+.build-progress.folded .bp-bar { width: 80px; height: 6px; }
+.chatrow { position: relative; }
+.chatrow .chatitem { padding-right: 34px; }
+.chatrow .unopen { position: absolute; top: 8px; right: 8px; padding: 2px 7px; font-size: 12px; line-height: 1.4; border-radius: 999px; opacity: 0.45; }
+.chatrow:hover .unopen, .chatrow .unopen:focus-visible { opacity: 1; }
+/* Map buttons wrap rather than run under the breadcrumbs; with a focused branch they sit a row lower. */
+.map-tools { flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 24px); }
+.center:has(.breadcrumbs) .map-tools { top: 58px; }
+.center:has(.breadcrumbs) .build-progress { top: 58px; }
+.bubble.answer { max-width: 100%; }
+.bubble.answer p { margin: 0 0 6px; }
+.bubble.answer ul { margin: 0 0 6px; padding-left: 18px; }
+.bubble.answer li { margin-bottom: 4px; }
+/* Node summary: a drop-down bar above the messages; open, its points scroll inside a capped box. */
+.summary-drop { margin-bottom: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.summary-drop > summary { cursor: pointer; padding: 8px 12px; font-size: 13px; color: var(--muted); list-style: none; display: flex; align-items: center; gap: 8px; }
+.summary-drop > summary::-webkit-details-marker { display: none; }
+.summary-drop > summary::after { content: '▾'; margin-left: auto; transition: transform 150ms ease; }
+.summary-drop[open] > summary::after { transform: rotate(180deg); }
+.summary-drop > summary:hover { color: var(--text); }
+.summary-drop > ul, .summary-drop > p { max-height: 40vh; overflow: auto; margin: 0; padding: 4px 12px 10px 30px; border-top: 1px solid var(--border); }
+.summary-drop > p { padding-left: 12px; }

@@ -29,7 +29,7 @@ Generate once with `npm run secrets:generate` and **retain** them (a new `WHATSA
 ```bash
 # runtime: DATABASE_URL COMPANION_DATABASE_URL WORKER_DATABASE_URL BETTER_AUTH_SECRET WHATSAPP_AUTH_ENCRYPTION_KEY
 #          NEBIUS_API_KEY S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY DATABASE_CA_CERT
-# admin:   MIGRATION_DATABASE_URL OWNER_PASSWORD
+# admin:   MIGRATION_DATABASE_URL
 CONFIRM=yes deploy/nebius/deploy.sh secrets
 ```
 

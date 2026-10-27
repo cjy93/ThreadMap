@@ -62,6 +62,21 @@ describe('layout', () => {
     // Deterministic.
     expect([...layoutTree(nodes).values()]).toEqual([...boxes.values()]);
   });
+
+  it('top-down layout spreads siblings sideways without overlaps', () => {
+    const nodes: LayoutInput[] = [{ id: 'r', parentId: null, diameter: 120, label: 'Root' }];
+    for (let i = 0; i < 12; i++) nodes.push({ id: `c${i}`, parentId: 'r', diameter: 60 + i * 4, label: `Child ${i}` });
+    for (let i = 0; i < 5; i++) nodes.push({ id: `g${i}`, parentId: 'c3', diameter: 50, label: `Grandchild ${i}` });
+    const boxes = layoutTree(nodes, 'down');
+    expect(overlaps(boxes.values())).toEqual([]);
+    const kids = [...boxes.values()].filter((b) => b.id.startsWith('c'));
+    // One row of children, all below the root, wider than tall.
+    expect(new Set(kids.map((b) => b.top)).size).toBe(1);
+    expect(kids.every((b) => b.top > boxes.get('r')!.top + boxes.get('r')!.height)).toBe(true);
+    const xs = kids.map((b) => b.x);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(boxes.get('g0')!.top);
+    expect(boxes.get('g0')!.top).toBeGreaterThan(kids[0].top);
+  });
 });
 
 describe('Baileys event normalization (pinned 7.0.0-rc14 shapes)', () => {

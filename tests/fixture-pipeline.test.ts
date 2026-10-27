@@ -17,7 +17,7 @@ let wsId: string;
 let chatIds: Record<'builders' | 'study' | 'music', string>;
 let modelCalls = 0;
 
-const ROOT_LETTER = { KNOWLEDGE: 'K', GENERAL_CHAT: 'G', RESOURCES: 'R' } as const;
+const ROOT_LETTER = { KNOWLEDGE: 'K', GENERAL_CHAT: 'G', EVENTS_ACTIVITIES: 'E', RESOURCES: 'R' } as const;
 
 beforeAll(async () => {
   t = await createTestDb();
@@ -41,7 +41,7 @@ async function pathMap(chatId: string) {
 }
 
 describe('fixture load + FixtureModelProvider pipeline', () => {
-  it('stores exactly 300 eligible human messages split 120/100/80 with three roots per chat', async () => {
+  it('stores exactly 300 eligible human messages split 120/100/80 with four roots per chat', async () => {
     for (const [k, expected] of Object.entries({ builders: 120, study: 100, music: 80 })) {
       const r = await t.db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM messages WHERE chat_id = ${chatIds[k as 'builders']}::uuid AND kind IN ('text','media') AND state = 'active'`);
       expect(r.rows[0].n, k).toBe(expected);
@@ -69,10 +69,12 @@ describe('fixture load + FixtureModelProvider pipeline', () => {
     expect(byPath.get('K/Programming/Hackathons/Tips')).toBeDefined();
     expect(byPath.get('K/Programming/School work/Tips')).toBeDefined();
     expect(byPath.get('K/Programming/Hackathons/Tips')).not.toBe(byPath.get('K/Programming/School work/Tips'));
-    // Refinement continued under the same logical job (frontiers completed).
+    // Refinement the model asked for continued under the same logical job (frontiers completed);
+    // deepening of crowded topics after the map is built runs under ledgers of its own.
     const fr = await t.db.select().from(s.taxonomyFrontiers).where(eq(s.taxonomyFrontiers.chatId, chatIds.builders));
-    expect(fr.length).toBeGreaterThan(0);
-    expect(new Set(fr.map((f) => f.logicalJobId)).size).toBe(1);
+    const asked = fr.filter((f) => !(f.checkpoint as { deepen?: boolean }).deepen);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(new Set(asked.map((f) => f.logicalJobId)).size).toBe(1);
     expect(fr.every((f) => f.status === 'completed')).toBe(true);
   });
 

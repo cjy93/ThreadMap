@@ -2,18 +2,19 @@
 // pg-boss worker; every model output is validated and published atomically,
 // with generation/revision checks so stale work cannot overwrite newer state.
 import crypto from 'node:crypto';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import * as s from '../../db/schema';
 import type { LlmConfig } from '../../lib/config';
 import type { Db, Tx } from '../db';
-import { ancestors, loadTree, lockChat, ROOT_LABELS, type RootEnum, type Tree } from '../graph/tree';
+import { ancestors, loadTree, lockChat, ROOT_LABELS, type RootEnum, type Tree, type TreeNode } from '../graph/tree';
 import { notifyChange } from '../notify';
-import { sha256 } from '../util';
-import { assignmentPrompt, extractionPrompt, linkPrompt, refinementPrompt, taxonomyPrompt, type PromptMessage, type TreeDigestNode, type UnitDigest } from './prompts';
+import { getStorage } from '../storage';
+import { sha256, sniffMime } from '../util';
+import { assignmentPrompt, describePrompt, extractionPrompt, linkPrompt, MAX_CHILD_TOPICS, refinementPrompt, regroupPrompt, splitPrompt, taxonomyPrompt, type PromptMessage, type TreeDigestNode, type UnitDigest } from './prompts';
 import type { FixtureHints } from './provider';
 import { BudgetExceededError, callModel, ensureLedger, estimateTokens, InvalidOutputError, type RouterDeps } from './router';
-import { AssignmentSchema, ExtractionSchema, JSON_SCHEMAS, LinkVerdictSchema, PIPELINE_VERSION, TaxonomySchema } from './schemas';
-import { validateTaxonomy, type UnitInfo } from './taxonomy';
+import { AssignmentSchema, DescribeSchema, ExtractionSchema, JSON_SCHEMAS, LinkVerdictSchema, PIPELINE_VERSION, RegroupSchema, SplitSchema, TaxonomySchema, type Assignment } from './schemas';
+import { isTopicTitle, validateTaxonomy, type UnitInfo } from './taxonomy';
 
 export interface PipelineDeps extends RouterDeps {
   cfg: LlmConfig;
@@ -24,9 +25,30 @@ type MsgRef = { m: string; r: number };
 
 const SUGGESTED_KNOWLEDGE = 'Programming, Music, Art, History';
 const REFINE_MIN_UNITS = 2;
-const MAX_TAXONOMY_UNITS_PER_CALL = 90;
+const MAX_TAXONOMY_UNITS_PER_CALL = 40;
+const MAX_ASSIGN_UNITS_PER_CALL = 40;
+// Share of the input limit the existing topic list may take; the rest is for discussions.
+const TOPIC_LIST_SHARE = 0.5;
+// Placing a big backlog continues in a follow-up job rather than outliving the
+// 10-minute stale-job reset.
+const ASSIGN_TIME_BUDGET_MS = 4 * 60_000;
+
+/**
+ * The largest leading slice of `items` whose prompt fits one model call (the
+ * router refuses anything over 1.5x the input limit). A long chat yields far
+ * more units than one call can hold; the rest are placed by later calls.
+ */
+async function fitBatch<U>(cfg: LlmConfig, items: U[], cap: number, render: (batch: U[]) => Promise<string>): Promise<U[]> {
+  const limit = cfg.LLM_MAX_INPUT_TOKENS_PER_CALL * 1.4;
+  let n = Math.min(items.length, cap);
+  for (;;) {
+    const est = estimateTokens(await render(items.slice(0, n)));
+    if (est <= limit || n <= 1) return items.slice(0, n);
+    n = Math.max(1, Math.min(n - 1, Math.floor(((n * limit) / est) * 0.9)));
+  }
+}
 const MAX_QUOTED_PER_CHUNK = 20;
-const ROOT_SHORT: Record<RootEnum, string> = { KNOWLEDGE: 'K', GENERAL_CHAT: 'G', RESOURCES: 'R' };
+const ROOT_SHORT: Record<RootEnum, string> = { KNOWLEDGE: 'K', GENERAL_CHAT: 'G', EVENTS_ACTIVITIES: 'E', RESOURCES: 'R' };
 
 export const fingerprintOf = (kind: string, refs: MsgRef[], extra = '') =>
   sha256(`${PIPELINE_VERSION}|${kind}|${extra}|${[...refs].sort((a, b) => (a.m < b.m ? -1 : 1)).map((x) => `${x.m}:${x.r}`).join(',')}`);
@@ -34,13 +56,31 @@ export const fingerprintOf = (kind: string, refs: MsgRef[], extra = '') =>
 // --------------------------------------------------------------------------
 // Dispatch: coalesce committed outbox rows into bounded microbatch jobs.
 // --------------------------------------------------------------------------
+// Nemotron runs on demand, not continuously: new messages of a chat are only
+// dispatched while its analysis window is open (just after it is first opened,
+// and after Refresh). force (tests, demo seeding, scripts) ignores the window.
+// Images in a waiting batch are still downloading (the companion fetches them for opened chats):
+// hold the batch so the vision model can read them, but never for longer than this.
+const IMAGE_WAIT_MS = 2 * 60 * 1000;
+async function awaitingImages(db: Db, chatId: string, oldest: Date): Promise<boolean> {
+  if (Date.now() - oldest.getTime() >= IMAGE_WAIT_MS) return false;
+  const r = await db.execute(sql`
+    SELECT 1 FROM analysis_outbox o JOIN attachments a ON a.message_id = o.message_id
+    WHERE o.chat_id = ${chatId}::uuid AND o.dispatched_job_id IS NULL AND a.media_type = 'image'
+      AND a.availability IN ('available', 'fetching') AND NOT a.view_once LIMIT 1`);
+  return r.rows.length > 0;
+}
+
 export async function dispatchOutbox(db: Db, cfg: LlmConfig, opts: { force?: boolean } = {}): Promise<string[]> {
   const pending = await db.execute<{ chat_id: string; n: number; oldest: Date }>(sql`
-    SELECT chat_id, count(*)::int AS n, min(created_at) AS oldest FROM analysis_outbox
-    WHERE dispatched_job_id IS NULL GROUP BY chat_id`);
+    SELECT o.chat_id, count(*)::int AS n, min(o.created_at) AS oldest FROM analysis_outbox o
+    JOIN chats c ON c.id = o.chat_id
+    WHERE o.dispatched_job_id IS NULL ${opts.force ? sql`` : sql`AND c.auto_analyze_until > now()`}
+    GROUP BY o.chat_id`);
   const created: string[] = [];
   for (const p of pending.rows) {
     const ready = opts.force || p.n >= cfg.LLM_MICROBATCH_MAX_MESSAGES || Date.now() - new Date(p.oldest).getTime() >= cfg.LLM_MICROBATCH_MAX_WAIT_MS;
+    if (ready && !opts.force && (await awaitingImages(db, p.chat_id, new Date(p.oldest)))) continue;
     if (!ready) continue;
     const ids = await db.transaction(async (tx) => {
       const chat = await lockChat(tx, p.chat_id);
@@ -151,6 +191,8 @@ interface LoadedMessage {
   nativeId: string;
   /** Native id of the quoted message, when this one is a reply. */
   replyTo: string | null;
+  /** Vision descriptions of attached images / video frames ("image: …"). */
+  media?: string[];
 }
 
 type MessageRow = { id: string; content_revision: number; sender_label: string; sent_at: Date | null; body: string | null; native_id: string; reply_to_native_id: string | null };
@@ -158,9 +200,10 @@ const contextMessage = (r: MessageRow): LoadedMessage => ({ id: r.id, rev: r.con
 
 async function loadCurrent(db: Db | Tx, refs: MsgRef[]): Promise<LoadedMessage[]> {
   if (!refs.length) return [];
-  const rows = await db.execute<MessageRow & { files: string[]; urls: string[] }>(sql`
+  const rows = await db.execute<MessageRow & { files: string[]; urls: string[]; media: string[] }>(sql`
     SELECT m.id, m.content_revision, m.sender_label, m.sent_at, m.body, m.native_id, m.reply_to_native_id,
       ARRAY(SELECT COALESCE(a.filename, a.media_type) FROM attachments a WHERE a.message_id = m.id) AS files,
+      ARRAY(SELECT a.media_type || ': ' || a.ai_description FROM attachments a WHERE a.message_id = m.id AND a.ai_description IS NOT NULL) AS media,
       ARRAY(SELECT r.url FROM resources r WHERE r.message_id = m.id AND r.kind = 'url') AS urls
     FROM messages m
     WHERE m.id IN (${sql.join(refs.map((r) => sql`${r.m}::uuid`), sql`, `)})
@@ -170,12 +213,15 @@ async function loadCurrent(db: Db | Tx, refs: MsgRef[]): Promise<LoadedMessage[]
   // A newer revision has its own outbox entry; skip stale revisions here.
   return rows.rows
     .filter((r) => want.get(r.id) === r.content_revision)
-    .map((r) => ({ ...contextMessage(r), files: r.files, urls: r.urls }));
+    .map((r) => ({ ...contextMessage(r), files: r.files, urls: r.urls, media: r.media }));
 }
 
 const promptText = (m: LoadedMessage, limit = 1200) => {
   const b = m.body ?? '';
-  return b.length > limit ? `${b.slice(0, limit)} [truncated]` : b;
+  const text = b.length > limit ? `${b.slice(0, limit)} [truncated]` : b;
+  // What the vision model saw in attached images / video frames, so they are categorised by content.
+  const media = (m.media ?? []).map((d) => `[${d}]`).join(' ');
+  return media ? (text ? `${text} ${media}` : media) : text;
 };
 
 async function nativeIdsFor(db: Db | Tx, ids: string[]): Promise<Map<string, string>> {
@@ -189,6 +235,7 @@ async function nativeIdsFor(db: Db | Tx, ids: string[]): Promise<Map<string, str
 // --------------------------------------------------------------------------
 async function runMicrobatch(deps: PipelineDeps, job: Job, chat: Chat): Promise<JobOutcome> {
   const { db, cfg } = deps;
+  await describeMedia(deps, job);
   const msgs = await loadCurrent(db, job.inputMessages);
   if (!msgs.length) return { status: 'completed', followUps: [], detail: { skipped: 'no current messages' } };
   const fixture = deps.provider.kind === 'fixture';
@@ -339,7 +386,9 @@ export async function maybeScheduleInitialTaxonomy(db: Db, chatId: string, exclu
       SELECT 1 FROM analysis_jobs WHERE chat_id = ${chatId}::uuid AND kind IN ('microbatch','rebuild')
         AND status IN ('pending','running') ${excludeJobId ? sql`AND id <> ${excludeJobId}::uuid` : sql``} LIMIT 1`);
     const outbox = await tx.execute(sql`SELECT 1 FROM analysis_outbox WHERE chat_id = ${chatId}::uuid AND dispatched_job_id IS NULL LIMIT 1`);
-    if (busy.rows.length || outbox.rows.length) return null;
+    // Messages waiting for a Refresh must not hold back the first map of what was already analysed.
+    const windowOpen = Boolean(chat.autoAnalyzeUntil && chat.autoAnalyzeUntil > new Date());
+    if (busy.rows.length || (outbox.rows.length && windowOpen)) return null;
     const units = await tx.select({ id: s.analysisUnits.id }).from(s.analysisUnits).where(and(eq(s.analysisUnits.chatId, chatId), isNull(s.analysisUnits.assignedTopicId)));
     if (!units.length) return null;
     const fp = sha256(`rebuild|${PIPELINE_VERSION}|${units.map((u) => u.id).sort().join(',')}`);
@@ -356,6 +405,9 @@ export async function maybeScheduleInitialTaxonomy(db: Db, chatId: string, exclu
 export async function requestRebuild(db: Db, chatId: string): Promise<string | null> {
   const [chat] = await db.select().from(s.chats).where(eq(s.chats.id, chatId));
   if (!chat) return null;
+  // One queued rebuild per chat is enough: it places everything still unplaced.
+  const [queued] = await db.select({ id: s.analysisJobs.id }).from(s.analysisJobs).where(and(eq(s.analysisJobs.chatId, chatId), eq(s.analysisJobs.kind, 'rebuild'), eq(s.analysisJobs.status, 'pending'))).limit(1);
+  if (queued) return null;
   const [job] = await db
     .insert(s.analysisJobs)
     .values({ workspaceId: chat.workspaceId, chatId, kind: 'rebuild', logicalJobId: crypto.randomUUID(), inputFingerprint: sha256(`rebuild|manual|${Date.now()}|${crypto.randomUUID()}`), inputMessages: [], pipelineVersion: PIPELINE_VERSION, deletionGeneration: chat.deletionGeneration, selectionEpoch: chat.selectionEpoch })
@@ -363,11 +415,84 @@ export async function requestRebuild(db: Db, chatId: string): Promise<string | n
   return job.id;
 }
 
+/**
+ * Rebuild a chat's map from scratch: every topic (and with it every placement,
+ * discussion, link and refinement frontier) is removed, the discussions Nemotron
+ * already read are kept, and one fresh build places them all again under the
+ * current rules. Messages and Read/Missed state are untouched. Returns the job id,
+ * or null while analysis is running (a running job would publish into the old map).
+ */
+export async function rebuildMapFromScratch(db: Db, chatId: string): Promise<string | null> {
+  const running = await db.execute(sql`SELECT 1 FROM analysis_jobs WHERE chat_id = ${chatId}::uuid AND status = 'running' LIMIT 1`);
+  if (running.rows.length) return null;
+  await db.transaction(async (tx) => {
+    await lockChat(tx, chatId);
+    await tx.execute(sql`UPDATE analysis_jobs SET status = 'cancelled' WHERE chat_id = ${chatId}::uuid AND kind IN ('rebuild', 'refine', 'links') AND status IN ('pending', 'budget_paused')`);
+    await tx.execute(sql`UPDATE user_chat_view_preferences SET focus_node_id = NULL WHERE chat_id = ${chatId}::uuid`);
+    await tx.delete(s.topicMergeMap).where(eq(s.topicMergeMap.chatId, chatId));
+    // Category roots stay; everything beneath them goes (placements, discussions, links and frontiers cascade).
+    await tx.delete(s.topics).where(and(eq(s.topics.chatId, chatId), eq(s.topics.kind, 'TOPIC')));
+    await tx.update(s.analysisUnits).set({ assignedTopicId: null }).where(eq(s.analysisUnits.chatId, chatId));
+    const [g] = await tx.update(s.chats).set({ graphVersion: sql`${s.chats.graphVersion} + 1` }).where(eq(s.chats.id, chatId)).returning({ v: s.chats.graphVersion, ws: s.chats.workspaceId });
+    await notifyChange(tx, { ws: g.ws, kind: 'graph', chatId, version: g.v });
+  });
+  return requestRebuild(db, chatId);
+}
+
+/** Failed map builds retried automatically before the chat waits for Refresh. */
+const MAX_AUTO_RESUMES = 3;
+
+/**
+ * Resumes map building for chats left partial by a failed rebuild (e.g. a
+ * provider error), so unplaced messages still reach the map without a Refresh.
+ * Waits two minutes after the failure and gives up after MAX_AUTO_RESUMES
+ * failed attempts within an hour, so a chat that keeps failing does not spend budget.
+ */
+export async function resumeStrandedBuilds(db: Db): Promise<string[]> {
+  const r = await db.execute<{ id: string }>(sql`
+    SELECT c.id FROM chats c JOIN workspaces w ON w.id = c.workspace_id
+    WHERE c.selected AND NOT c.excluded AND w.mode = 'private'
+      AND EXISTS (SELECT 1 FROM analysis_units u WHERE u.chat_id = c.id AND u.assigned_topic_id IS NULL)
+      AND NOT EXISTS (SELECT 1 FROM analysis_jobs j WHERE j.chat_id = c.id AND j.status IN ('pending', 'running', 'budget_paused'))
+      AND (SELECT j.status FROM analysis_jobs j WHERE j.chat_id = c.id AND j.kind = 'rebuild' ORDER BY j.created_at DESC LIMIT 1) = 'failed'
+      AND (SELECT max(coalesce(j.completed_at, j.started_at, j.created_at)) FROM analysis_jobs j WHERE j.chat_id = c.id) < now() - interval '2 minutes'
+      AND (SELECT count(*) FROM analysis_jobs j WHERE j.chat_id = c.id AND j.kind = 'rebuild' AND j.status = 'failed' AND j.created_at > now() - interval '1 hour'
+             AND j.created_at > coalesce((SELECT max(k.created_at) FROM analysis_jobs k WHERE k.chat_id = c.id AND k.kind = 'rebuild' AND k.status = 'completed'), 'epoch'::timestamptz)) < ${MAX_AUTO_RESUMES}
+    LIMIT 20`);
+  const ids: string[] = [];
+  for (const row of r.rows) {
+    const id = await requestRebuild(db, row.id);
+    if (id) ids.push(id);
+  }
+  return ids;
+}
+
 type UnitRow = typeof s.analysisUnits.$inferSelect;
 
 function topicPathKey(tree: Tree, id: string): string {
   const chain = ancestors(tree, id);
   return [ROOT_SHORT[chain[0].root], ...chain.slice(1).map((n) => n.title)].join('/');
+}
+
+/**
+ * The topic list sent with a window, within a fixed share of the prompt: broad
+ * levels first, then deeper ones while room remains. A long chat's full tree no
+ * longer fits one call; units go under the broad topics and refinement files
+ * them deeper later. `keep` ids (e.g. topics a reply points at) are always sent.
+ */
+function fitTopics(cfg: LlmConfig, nodes: TreeDigestNode[], keep: Set<string> = new Set()): TreeDigestNode[] {
+  const budget = cfg.LLM_MAX_INPUT_TOKENS_PER_CALL * TOPIC_LIST_SHARE;
+  const depth = (n: TreeDigestNode) => n.path.split(' > ').length;
+  const ordered = [...nodes].sort((a, b) => Number(keep.has(b.id)) - Number(keep.has(a.id)) || depth(a) - depth(b));
+  const out: TreeDigestNode[] = [];
+  let used = 0;
+  for (const n of ordered) {
+    const t = estimateTokens(JSON.stringify(n));
+    if (used + t > budget && !keep.has(n.id)) break;
+    out.push(n);
+    used += t;
+  }
+  return out;
 }
 
 function treeDigest(tree: Tree, locked: Set<string>, rootFilter?: RootEnum): TreeDigestNode[] {
@@ -381,10 +506,45 @@ async function lockedTopicIds(db: Db | Tx, chatId: string): Promise<Set<string>>
   return new Set(r.map((x) => x.id));
 }
 
-function digestUnit(u: UnitRow, sampleOf: Map<string, string>, refOf: Map<string, string>): UnitDigest {
+/**
+ * Models abbreviate long UUIDs (e.g. to their first 8 characters), which then fail
+ * validation and strand every unit in Needs review. Units and topics are therefore
+ * sent as short keys (u1…, t1…) and mapped back before validation.
+ */
+class ShortKeys {
+  private toShort = new Map<string, string>();
+  private toLong = new Map<string, string>();
+  constructor(private prefix: string) {}
+  short(id: string): string {
+    let k = this.toShort.get(id);
+    if (!k) {
+      k = `${this.prefix}${this.toShort.size + 1}`;
+      this.toShort.set(id, k);
+      this.toLong.set(k, id);
+    }
+    return k;
+  }
+  long(key: string): string {
+    return this.toLong.get(key) ?? key;
+  }
+}
+
+type TaxonomyValue = { nodes: { key: string; parent: string }[]; assignments: { unit_key: string; topic: string }[]; secondary_placements: { message_ref: string; topic: string }[] };
+function taxonomyFromModel<T extends TaxonomyValue>(v: T, units: ShortKeys, topics: ShortKeys): T {
+  return {
+    ...v,
+    nodes: v.nodes.map((n) => ({ ...n, parent: topics.long(n.parent) })),
+    assignments: v.assignments.map((a) => ({ ...a, unit_key: units.long(a.unit_key), topic: topics.long(a.topic) })),
+    secondary_placements: v.secondary_placements.map((x) => ({ ...x, topic: topics.long(x.topic) })),
+  };
+}
+
+const shortTopics = (nodes: TreeDigestNode[], topics: ShortKeys): TreeDigestNode[] => nodes.map((n) => ({ ...n, id: topics.short(n.id) }));
+
+function digestUnit(u: UnitRow, sampleOf: Map<string, string>, refOf: Map<string, string>, units: ShortKeys): UnitDigest {
   const meta = u.summaryBullets as { title: string };
   return {
-    unit_key: u.id,
+    unit_key: units.short(u.id),
     primary_root: u.primaryRoot,
     discussion_title: meta.title,
     topic_terms: u.topicTerms,
@@ -408,21 +568,117 @@ async function sampleTexts(db: Db | Tx, units: UnitRow[]) {
 }
 
 // --------------------------------------------------------------------------
-// Initial/explicit taxonomy (Ultra)
+// Vision: images and video preview frames are described before categorisation
+// (Token Factory offers no audio model, so voice clips rely on surrounding text).
 // --------------------------------------------------------------------------
+const MAX_DESCRIBE_PER_JOB = 24;
+const MAX_VISION_BYTES = 5 * 1024 * 1024;
+
+async function describeMedia(deps: PipelineDeps, job: Job): Promise<number> {
+  const refs = job.inputMessages;
+  if (!refs.length) return 0;
+  const rows = await deps.db.execute<{ id: string; media_type: 'image' | 'video'; object_key: string | null; availability: string; thumbnail: Buffer | null; mime: string | null; caption: string | null }>(sql`
+    SELECT a.id, a.media_type, a.object_key, a.availability, a.thumbnail, COALESCE(a.detected_mime, a.declared_mime) AS mime, m.body AS caption
+    FROM attachments a JOIN messages m ON m.id = a.message_id
+    WHERE a.message_id IN (${sql.join(refs.map((r) => sql`${r.m}::uuid`), sql`, `)}) AND m.state = 'active' AND a.ai_description IS NULL AND NOT a.view_once
+      AND ((a.media_type = 'image' AND a.availability = 'cached' AND a.object_key IS NOT NULL) OR (a.media_type IN ('image', 'video') AND a.thumbnail IS NOT NULL))
+    LIMIT ${MAX_DESCRIBE_PER_JOB}`);
+  let n = 0;
+  for (const a of rows.rows) {
+    // The downloaded image when available, otherwise WhatsApp's embedded preview (always the case for video).
+    const full = a.media_type === 'image' && a.availability === 'cached' && a.object_key ? await getStorage().get(a.object_key) : null;
+    const usable = full && full.length <= MAX_VISION_BYTES && (sniffMime(full) ?? '').startsWith('image/') ? full : null;
+    const bytes = usable ?? a.thumbnail;
+    if (!bytes) continue;
+    const mime = usable ? sniffMime(usable)! : 'image/jpeg';
+    try {
+      const res = await callModel(deps, { workspaceId: job.workspaceId, logicalJobId: job.logicalJobId, jobId: job.id }, {
+        role: 'vision',
+        operation: 'describe',
+        ...describePrompt(a.media_type, a.caption),
+        schema: DescribeSchema,
+        schemaName: 'describe',
+        jsonSchema: JSON_SCHEMAS.describe,
+        maxOutputTokens: 600,
+        images: [{ mime, b64: Buffer.from(bytes).toString('base64') }],
+      });
+      await deps.db
+        .update(s.attachments)
+        .set({ aiDescription: res.value.description, aiDescribedBy: res.modelId, updatedAt: new Date() })
+        .where(and(eq(s.attachments.id, a.id), isNull(s.attachments.aiDescription)));
+      n++;
+    } catch (e) {
+      if (e instanceof BudgetExceededError) throw e;
+      // One unreadable image must not block the chat's categorisation.
+    }
+  }
+  return n;
+}
+
+// --------------------------------------------------------------------------
+// Initial/explicit taxonomy (Super)
+// --------------------------------------------------------------------------
+/**
+ * Builds the map in windows of up to 40 discussions. Each call sees only the
+ * existing topic names plus one window, and either reuses those topics or adds
+ * new ones (at any depth), so a long chat never needs one oversized prompt.
+ */
 async function runRebuild(deps: PipelineDeps, job: Job, chat: Chat): Promise<JobOutcome> {
   const { db } = deps;
-  const all = await db.select().from(s.analysisUnits).where(and(eq(s.analysisUnits.chatId, chat.id), isNull(s.analysisUnits.assignedTopicId)));
-  if (!all.length) return { status: 'completed', followUps: [], detail: { units: 0 } };
-  const batch = all.slice(0, MAX_TAXONOMY_UNITS_PER_CALL);
+  const started = Date.now();
+  const followUps: string[] = [];
+  const detail = { units: 0, windows: 0, newTopics: 0, rejected: [] as unknown[], model: null as string | null, frontiers: 0 };
+  let before = Infinity;
+  let continued = false;
+  for (;;) {
+    const all = await db.select().from(s.analysisUnits).where(and(eq(s.analysisUnits.chatId, chat.id), isNull(s.analysisUnits.assignedTopicId)));
+    // Done, or the last window placed nothing (avoid spinning on units the model will not place).
+    if (!all.length || all.length >= before) break;
+    if (Date.now() - started > ASSIGN_TIME_BUDGET_MS) {
+      const next = await requestRebuild(db, chat.id);
+      if (next) followUps.push(next);
+      continued = true;
+      break;
+    }
+    before = all.length;
+    const w = await taxonomyWindow(deps, job, chat, all);
+    followUps.push(...w.followUps);
+    detail.units += w.units;
+    detail.windows++;
+    detail.newTopics += w.newTopics;
+    detail.rejected.push(...w.rejected);
+    detail.model = w.model;
+    detail.frontiers += w.frontiers;
+  }
+  // Nothing new to place: only a map breaking the readability rules (e.g. built under older ones) needs tidying.
+  if (!detail.windows && !(await mapNeedsTidy(db, chat.id))) return { status: 'completed', followUps: [], detail: { units: 0 } };
+  // With everything placed, tidy the map: group related siblings, split crowded topics.
+  const reshaped = continued ? null : await reshapeTree(deps, job, chat);
+  if (reshaped) followUps.push(...reshaped.followUps);
+  followUps.push(...(await scheduleLinks(db, chat.workspaceId)));
+  return { status: 'completed', followUps: [...new Set(followUps)], detail: { ...detail, rejected: detail.rejected.slice(0, 20), continued, reshaped: reshaped?.detail ?? null } };
+}
+
+/** One window: the existing topic names plus as many unplaced discussions as fit one call. */
+async function taxonomyWindow(deps: PipelineDeps, job: Job, chat: Chat, all: UnitRow[]) {
+  const { db } = deps;
   const tree = await loadTree(db, chat.id);
   const locked = await lockedTopicIds(db, chat.id);
-  const { sample, native, refOf } = await sampleTexts(db, batch);
-  const digests = batch.map((u) => digestUnit(u, sample, refOf));
-  const p = taxonomyPrompt(chat.title, digests, treeDigest(tree, locked), SUGGESTED_KNOWLEDGE);
-  const hints = deps.provider.kind === 'fixture' ? fixtureHints(tree, batch, native, refOf) : undefined;
-  const res = await callModel(deps, { workspaceId: job.workspaceId, logicalJobId: job.logicalJobId, jobId: job.id }, {
-    role: 'reasoning',
+  const render = async (units: UnitRow[]) => {
+    const { sample, native, refOf } = await sampleTexts(db, units);
+    const unitKeys = new ShortKeys('u');
+    const topicKeys = new ShortKeys('t');
+    const digests = units.map((u) => digestUnit(u, sample, refOf, unitKeys));
+    return { p: taxonomyPrompt(chat.title, digests, shortTopics(fitTopics(deps.cfg, treeDigest(tree, locked)), topicKeys), SUGGESTED_KNOWLEDGE), native, refOf, unitKeys, topicKeys };
+  };
+  const batch = await fitBatch(deps.cfg, all, MAX_TAXONOMY_UNITS_PER_CALL, async (b) => {
+    const { p } = await render(b);
+    return p.system + p.user;
+  });
+  const { p, native, refOf, unitKeys, topicKeys } = await render(batch);
+  const hints = deps.provider.kind === 'fixture' ? fixtureHints(tree, batch, native, refOf, unitKeys) : undefined;
+  const raw = await callModel(deps, { workspaceId: job.workspaceId, logicalJobId: job.logicalJobId, jobId: job.id }, {
+    role: 'balanced',
     operation: 'taxonomy',
     ...p,
     schema: TaxonomySchema,
@@ -430,24 +686,18 @@ async function runRebuild(deps: PipelineDeps, job: Job, chat: Chat): Promise<Job
     jsonSchema: JSON_SCHEMAS.taxonomy,
     hints,
   });
+  const res = { ...raw, value: taxonomyFromModel(raw.value, unitKeys, topicKeys) };
   const refToMsg = new Map([...refOf].map(([id, r]) => [r, id]));
   const unitInfos: UnitInfo[] = batch.map((u) => ({ unitKey: u.id, primaryRoot: u.primaryRoot, messageRefs: u.messageRefs.map((r) => r.m) }));
   const plan = validateTaxonomy(tree, res.value, unitInfos, { allowedRefs: new Set(refToMsg.keys()) });
   const published = await publishPlan(db, job, chat.id, plan, batch, refToMsg, res.modelId, { prov: provOf(deps) });
-  const followUps = published.followUps;
-  // Remaining units beyond this call are placed incrementally.
-  if (all.length > batch.length) {
-    const more = await assignIncremental(deps, job, chat);
-    followUps.push(...more.followUps);
-  }
-  followUps.push(...(await scheduleLinks(db, chat.workspaceId)));
-  return { status: 'completed', followUps, detail: { units: batch.length, newTopics: plan.newTopics.length, rejected: plan.rejected.slice(0, 20), model: res.modelId, frontiers: published.frontiers } };
+  return { followUps: published.followUps, units: batch.length, newTopics: plan.newTopics.length, rejected: plan.rejected.slice(0, 20) as unknown[], model: res.modelId, frontiers: published.frontiers };
 }
 
-function fixtureHints(tree: Tree, units: UnitRow[], native: Map<string, string>, refOf: Map<string, string>): FixtureHints {
+function fixtureHints(tree: Tree, units: UnitRow[], native: Map<string, string>, refOf: Map<string, string>, unitKeys: ShortKeys): FixtureHints {
   return {
     refs: Object.fromEntries([...refOf].map(([id, r]) => [r, native.get(id)!])),
-    units: Object.fromEntries(units.map((u) => [u.id, u.messageRefs.map((r) => native.get(r.m)!)])),
+    units: Object.fromEntries(units.map((u) => [unitKeys.short(u.id), u.messageRefs.map((r) => native.get(r.m)!)])),
     topicPaths: Object.fromEntries([...tree.nodes.values()].map((n) => [n.id, topicPathKey(tree, n.id)])),
   };
 }
@@ -652,23 +902,35 @@ async function runRefine(deps: PipelineDeps, job: Job, chat: Chat): Promise<JobO
     await db.update(s.taxonomyFrontiers).set({ status: 'completed', checkpoint: { reason: 'too little content' } }).where(eq(s.taxonomyFrontiers.id, fr.id));
     return { status: 'completed', followUps: [] };
   }
+  const parentPathFull = ancestors(tree, parent.id).map((a) => a.title).join(' > ');
+  // A crowded topic may hold more units than one call; refine a prompt-sized batch
+  // (the rest stay on the branch and are picked up by the next deepening pass).
+  const fitted = await fitBatch(deps.cfg, units, MAX_TAXONOMY_UNITS_PER_CALL, async (b) => {
+    const { sample: smp, refOf: rf } = await sampleTexts(db, b);
+    const uk = new ShortKeys('u');
+    const pp = refinementPrompt(chat.title, parentPathFull, 't0', [], b.map((u) => digestUnit(u, smp, rf, uk)));
+    return pp.system + pp.user + ' '.repeat(parent.childIds.length * 60);
+  });
+  units.splice(fitted.length);
   const { sample, native, refOf } = await sampleTexts(db, units);
   for (const r of secondary.rows) if (!refOf.has(r.message_id)) refOf.set(r.message_id, `r${refOf.size + 1}`);
   if (deps.provider.kind === 'fixture') {
     const more = await nativeIdsFor(db, secondary.rows.map((r) => r.message_id));
     for (const [k, v] of more) native.set(k, v);
   }
-  const digests = units.map((u) => digestUnit(u, sample, refOf));
+  const unitKeys = new ShortKeys('u');
+  const topicKeys = new ShortKeys('t');
+  const digests = units.map((u) => digestUnit(u, sample, refOf, unitKeys));
   const secondaryRefs = secondary.rows.map((r) => refOf.get(r.message_id)!);
   const parentPath = ancestors(tree, parent.id).map((a) => a.title).join(' > ');
-  const children = parent.childIds.map((c) => ({ id: c, path: `${parentPath} > ${tree.nodes.get(c)!.title}`, locked: false }));
-  const p = refinementPrompt(chat.title, parentPath, parent.id, children, digests);
+  const children = parent.childIds.map((c) => ({ id: topicKeys.short(c), path: `${parentPath} > ${tree.nodes.get(c)!.title}`, locked: false }));
+  const p = refinementPrompt(chat.title, parentPath, topicKeys.short(parent.id), children, digests);
   const user = JSON.stringify({ ...JSON.parse(p.user), secondary_message_refs: secondaryRefs });
-  const hints = deps.provider.kind === 'fixture' ? fixtureHints(tree, units, native, refOf) : undefined;
+  const hints = deps.provider.kind === 'fixture' ? fixtureHints(tree, units, native, refOf, unitKeys) : undefined;
   let res;
   try {
-    res = await callModel(deps, { workspaceId: job.workspaceId, logicalJobId: job.logicalJobId, jobId: job.id }, {
-      role: 'reasoning',
+    const raw = await callModel(deps, { workspaceId: job.workspaceId, logicalJobId: job.logicalJobId, jobId: job.id }, {
+      role: 'balanced',
       operation: 'refine',
       system: p.system,
       user,
@@ -677,6 +939,7 @@ async function runRefine(deps: PipelineDeps, job: Job, chat: Chat): Promise<JobO
       jsonSchema: JSON_SCHEMAS.taxonomy,
       hints,
     });
+    res = { ...raw, value: taxonomyFromModel(raw.value, unitKeys, topicKeys) };
   } catch (e) {
     if (e instanceof BudgetExceededError) {
       // Keep the valid partial hierarchy and the unfinished frontier for resumption.
@@ -693,9 +956,12 @@ async function runRefine(deps: PipelineDeps, job: Job, chat: Chat): Promise<JobO
   const published = await publishPlan(db, job, chat.id, plan, units, refToMsg, res.modelId, { prov: provOf(deps), moveFromParent: parent.id });
   await db
     .update(s.taxonomyFrontiers)
-    .set({ status: 'completed', checkpoint: { newTopics: plan.newTopics.length, noUsefulSubdivision: res.value.no_useful_subdivision }, updatedAt: new Date() })
+    .set({ status: 'completed', checkpoint: { ...(fr.checkpoint as object), newTopics: plan.newTopics.length, units: units.length, noUsefulSubdivision: res.value.no_useful_subdivision }, updatedAt: new Date() })
     .where(eq(s.taxonomyFrontiers.id, fr.id));
-  return { status: 'completed', followUps: published.followUps, detail: { parent: parent.id, newTopics: plan.newTopics.length, model: res.modelId } };
+  await keepLevelsReadable(deps, job, chat);
+  // Keep going down while branches stay crowded.
+  const deeper = await scheduleDeepening(db, job, chat.id);
+  return { status: 'completed', followUps: [...published.followUps, ...deeper], detail: { parent: parent.id, newTopics: plan.newTopics.length, model: res.modelId } };
 }
 
 /** Resume budget-paused frontiers under their ORIGINAL logical ledger. */
@@ -718,35 +984,81 @@ export async function resumePausedFrontiers(db: Db, chatId: string): Promise<str
 // --------------------------------------------------------------------------
 // Incremental assignment (Nano, escalating ambiguity to Super)
 // --------------------------------------------------------------------------
+/** Places every unassigned unit, one prompt-sized batch per call. */
 async function assignIncremental(deps: PipelineDeps, job: Job, chat: Chat): Promise<{ followUps: string[]; detail: Record<string, unknown> }> {
   const { db } = deps;
-  const units = await db.select().from(s.analysisUnits).where(and(eq(s.analysisUnits.chatId, chat.id), isNull(s.analysisUnits.assignedTopicId)));
-  if (!units.length) return { followUps: [], detail: {} };
+  const started = Date.now();
+  const followUps: string[] = [];
+  const detail = { assigned: 0, escalated: 0, rejected: [] as unknown[], continued: false };
+  let before = Infinity;
+  for (;;) {
+    const units = await db.select().from(s.analysisUnits).where(and(eq(s.analysisUnits.chatId, chat.id), isNull(s.analysisUnits.assignedTopicId)));
+    // Done, or the last batch placed nothing (avoid spinning on units the model will not place).
+    if (!units.length || units.length >= before) break;
+    if (Date.now() - started > ASSIGN_TIME_BUDGET_MS) {
+      const next = await requestRebuild(db, chat.id);
+      if (next) followUps.push(next);
+      detail.continued = true;
+      break;
+    }
+    before = units.length;
+    const r = await assignBatch(deps, job, chat, units);
+    followUps.push(...r.followUps);
+    detail.assigned += r.assigned;
+    detail.escalated += r.escalated;
+    detail.rejected.push(...r.rejected);
+  }
+  if (detail.assigned && !detail.continued) await keepLevelsReadable(deps, job, chat);
+  return { followUps: [...new Set(followUps)], detail: { ...detail, rejected: detail.rejected.slice(0, 20) } };
+}
+
+async function assignBatch(deps: PipelineDeps, job: Job, chat: Chat, pending: UnitRow[]): Promise<{ followUps: string[]; assigned: number; escalated: number; rejected: unknown[] }> {
+  const { db } = deps;
   const tree = await loadTree(db, chat.id);
   const locked = await lockedTopicIds(db, chat.id);
-  const { sample, native, refOf } = await sampleTexts(db, units);
-  const replyTopics = await replyTopicsFor(db, chat.id, units, tree);
-  const digests = units.map((u) => {
-    const d = digestUnit(u, sample, refOf);
-    const rt = replyTopics.get(u.id) ?? [];
-    return rt.length ? { ...d, reply_topics: rt } : d;
-  });
+  const replyTopics = await replyTopicsFor(db, chat.id, pending, tree);
   const all = [...tree.roots.map((r) => ({ id: r.id, path: r.title, locked: true })), ...treeDigest(tree, locked)];
-  const candidates = all.slice(0, 400);
-  // Topics a reply points at stay choosable even past the candidate cap.
-  const wanted = new Set([...replyTopics.values()].flat());
-  candidates.push(...all.slice(400).filter((c) => wanted.has(c.id)));
-  const hints = deps.provider.kind === 'fixture' ? fixtureHints(tree, units, native, refOf) : undefined;
-  const p = assignmentPrompt(chat.title, digests, candidates);
+  const render = async (batch: UnitRow[]) => {
+    const { sample, native, refOf } = await sampleTexts(db, batch);
+    const unitKeys = new ShortKeys('u');
+    const topicKeys = new ShortKeys('t');
+    const digests = batch.map((u) => {
+      const d = digestUnit(u, sample, refOf, unitKeys);
+      const rt = replyTopics.get(u.id) ?? [];
+      return rt.length ? { ...d, reply_topics: rt.map((t) => topicKeys.short(t)) } : d;
+    });
+    // Topics a reply points at stay choosable even past the candidate budget.
+    const wanted = new Set(batch.flatMap((u) => replyTopics.get(u.id) ?? []));
+    const candidates = fitTopics(deps.cfg, all, wanted);
+    const shortCandidates = shortTopics(candidates, topicKeys);
+    return { digests, shortCandidates, native, refOf, unitKeys, topicKeys, p: assignmentPrompt(chat.title, digests, shortCandidates) };
+  };
+  const units = await fitBatch(deps.cfg, pending, MAX_ASSIGN_UNITS_PER_CALL, async (b) => {
+    const { p } = await render(b);
+    return p.system + p.user;
+  });
+  const { digests, shortCandidates, native, refOf, unitKeys, topicKeys, p } = await render(units);
+  const hints = deps.provider.kind === 'fixture' ? fixtureHints(tree, units, native, refOf, unitKeys) : undefined;
   const scope = { workspaceId: job.workspaceId, logicalJobId: job.logicalJobId, jobId: job.id };
-  const first = await callModel(deps, scope, { role: 'fast', operation: 'assign', ...p, schema: AssignmentSchema, schemaName: 'assignment', jsonSchema: JSON_SCHEMAS.assignment, hints });
+  // Model output speaks in short keys; map units and topics back before using it.
+  const fromModel = (v: Assignment): Assignment => ({
+    assignments: v.assignments.map((a) => ({
+      ...a,
+      unit_key: unitKeys.long(a.unit_key),
+      topic_id: a.topic_id ? topicKeys.long(a.topic_id) : a.topic_id,
+      new_topic: a.new_topic ? { ...a.new_topic, parent_id: topicKeys.long(a.new_topic.parent_id) } : a.new_topic,
+    })),
+    secondary_placements: v.secondary_placements.map((x) => ({ ...x, topic_id: topicKeys.long(x.topic_id) })),
+  });
+  const firstRaw = await callModel(deps, scope, { role: 'fast', operation: 'assign', ...p, schema: AssignmentSchema, schemaName: 'assignment', jsonSchema: JSON_SCHEMAS.assignment, hints });
+  const first = { ...firstRaw, value: fromModel(firstRaw.value) };
   let assignments = first.value.assignments;
   const ambiguous = assignments.filter((a) => a.confidence < 0.6 || (!a.topic_id && !a.new_topic)).map((a) => a.unit_key);
   if (ambiguous.length) {
-    const sub = digests.filter((d) => ambiguous.includes(d.unit_key));
-    const p2 = assignmentPrompt(chat.title, sub, candidates);
-    const second = await callModel(deps, scope, { role: 'balanced', operation: 'assign:escalate', ...p2, schema: AssignmentSchema, schemaName: 'assignment', jsonSchema: JSON_SCHEMAS.assignment, hints });
-    assignments = [...assignments.filter((a) => !ambiguous.includes(a.unit_key)), ...second.value.assignments.filter((a) => ambiguous.includes(a.unit_key))];
+    const sub = digests.filter((d) => ambiguous.includes(unitKeys.long(d.unit_key)));
+    const p2 = assignmentPrompt(chat.title, sub, shortCandidates);
+    const second = fromModel((await callModel(deps, scope, { role: 'balanced', operation: 'assign:escalate', ...p2, schema: AssignmentSchema, schemaName: 'assignment', jsonSchema: JSON_SCHEMAS.assignment, hints })).value);
+    assignments = [...assignments.filter((a) => !ambiguous.includes(a.unit_key)), ...second.assignments.filter((a) => ambiguous.includes(a.unit_key))];
   }
   // Translate into a taxonomy plan so publication shares one validated path.
   const nodes: { key: string; parent: string; title: string; aliases: string[]; may_subdivide: boolean }[] = [];
@@ -768,7 +1080,7 @@ async function assignIncremental(deps: PipelineDeps, job: Job, chat: Chat): Prom
     { allowedRefs: new Set(refToMsg.keys()) },
   );
   const published = await publishPlan(db, job, chat.id, plan, units, refToMsg, first.modelId, { prov: provOf(deps), frontierCandidates: false });
-  return { followUps: [...published.followUps, ...(await scheduleLinks(db, chat.workspaceId))], detail: { assigned: units.length, escalated: ambiguous.length, rejected: plan.rejected.slice(0, 20) } };
+  return { followUps: [...published.followUps, ...(await scheduleLinks(db, chat.workspaceId))], assigned: units.length, escalated: ambiguous.length, rejected: plan.rejected.slice(0, 20) };
 }
 
 // --------------------------------------------------------------------------
@@ -930,6 +1242,359 @@ async function runLinks(deps: PipelineDeps, job: Job): Promise<JobOutcome> {
   }
   await notifyChange(db, { ws: job.workspaceId, kind: 'graph' });
   return { status: 'completed', followUps: [], detail: { candidates: candidates.length, verified, rejected } };
+}
+
+// --------------------------------------------------------------------------
+// Reshaping a built map: the first taxonomy sees only a slice of a long chat and
+// later units are added side by side, which leaves wide, shallow levels. Once the
+// backlog is placed, related siblings get a common parent (Super) and crowded
+// topics are split further (refinement, recursively).
+// --------------------------------------------------------------------------
+const REGROUP_MIN_CHILDREN = 6;
+const REGROUP_MAX_PARENTS = 6;
+const REGROUP_MAX_PASSES = 3;
+const OTHER_TOPICS = 'Other topics';
+const SPLIT_MAX_TOPICS = 12;
+const SPLIT_MAX_UNITS = 80;
+const DEEPEN_MIN_UNITS = 6;
+const DEEPEN_MAX_TOPICS = 12;
+const DEEPEN_MAX_DEPTH = 8;
+
+async function reshapeTree(deps: PipelineDeps, job: Job, chat: Chat): Promise<{ followUps: string[]; detail: Record<string, unknown> }> {
+  let regrouped = 0;
+  let split = 0;
+  try {
+    // One subject per topic first, so grouping works with clean titles.
+    split = await splitCompoundTopics(deps, job, chat);
+    regrouped = await regroupTopics(deps, job, chat);
+  } catch (e) {
+    // A failed tidy-up must not undo a built map.
+    if (e instanceof BudgetExceededError) throw e;
+    regrouped = -1;
+  }
+  const followUps = await scheduleDeepening(deps.db, job, chat.id);
+  return { followUps, detail: { split, regrouped, deepening: followUps.length } };
+}
+
+/** After topics were added: bring any level back to MAX_CHILD_TOPICS (no model call when none is over). */
+async function keepLevelsReadable(deps: PipelineDeps, job: Job, chat: Chat): Promise<number> {
+  if (!overfull(await loadTree(deps.db, chat.id)).length) return 0;
+  try {
+    return await regroupTopics(deps, job, chat, { tidy: false });
+  } catch (e) {
+    if (e instanceof BudgetExceededError) throw e;
+    return -1;
+  }
+}
+
+/** "Academic and Career Guidance", "Cloud & Hosting": a title that joins subjects. */
+const COMPOUND_TITLE = /\s(?:and|&)\s/i;
+
+function compoundTopics(tree: Tree, locked: Set<string>): TreeNode[] {
+  return [...tree.nodes.values()].filter((n) => n.kind === 'TOPIC' && !n.needsReview && !locked.has(n.id) && n.title !== OTHER_TOPICS && COMPOUND_TITLE.test(n.title));
+}
+
+/** Whether the chat's map breaks a readability rule: a level over MAX_CHILD_TOPICS, or a topic joining subjects. */
+export async function mapNeedsTidy(db: Db, chatId: string): Promise<boolean> {
+  const tree = await loadTree(db, chatId);
+  return overfull(tree).length > 0 || compoundTopics(tree, await lockedTopicIds(db, chatId)).length > 0;
+}
+
+/**
+ * One subject per topic: "Academic and Career Guidance" becomes "Academic" and
+ * "Career" side by side, its subtopics and discussions shared out between them
+ * (e.g. "Academic > Academic guidance"). Super decides the parts; a title that
+ * names one subject ("Research and Development") is left alone. The old topic is
+ * retired into the first part, like a merge, so links and filters follow it.
+ * Returns how many topics were split.
+ */
+export async function splitCompoundTopics(deps: PipelineDeps, job: Job, chat: Chat): Promise<number> {
+  const { db } = deps;
+  const tree = await loadTree(db, chat.id);
+  const locked = await lockedTopicIds(db, chat.id);
+  const todo = compoundTopics(tree, locked)
+    .filter((n) => n.parentId)
+    .slice(0, SPLIT_MAX_TOPICS);
+  let split = 0;
+  for (const t of todo) {
+    const lockedHere = await db.execute(sql`SELECT 1 FROM placements WHERE topic_id = ${t.id}::uuid AND locked LIMIT 1`);
+    if (lockedHere.rows.length) continue; // the owner pinned messages here
+    const kids = t.childIds.map((c) => tree.nodes.get(c)!).filter((k) => k.kind === 'TOPIC');
+    const units = await db.select().from(s.analysisUnits).where(eq(s.analysisUnits.assignedTopicId, t.id));
+    const childKey = new Map(kids.map((k, i) => [`c${i + 1}`, k]));
+    const unitKey = new Map(units.slice(0, SPLIT_MAX_UNITS).map((u, i) => [`u${i + 1}`, u]));
+    const parentPath = ancestors(tree, t.parentId!).map((a) => a.title).join(' > ');
+    const p = splitPrompt(
+      chat.title,
+      parentPath,
+      t.title,
+      [...childKey].map(([key, k]) => ({ key, title: k.title })),
+      [...unitKey].map(([key, u]) => ({ key, title: (u.summaryBullets as { title: string }).title })),
+    );
+    const r = await callModel(deps, { workspaceId: job.workspaceId, logicalJobId: job.logicalJobId, jobId: job.id }, { role: 'balanced', operation: 'split', ...p, schema: SplitSchema, schemaName: 'split', jsonSchema: JSON_SCHEMAS.split, maxOutputTokens: 2000 });
+    const parts = r.value.parts.filter((x) => isTopicTitle(x.title) && !COMPOUND_TITLE.test(x.title));
+    if (parts.length < 2) continue;
+    // Anything the model left out goes to the part whose words it shares, else the first.
+    const words = (x: string) => new Set(x.toLocaleLowerCase('und').split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2));
+    const closest = (title: string) => {
+      const w = words(title);
+      let best = 0;
+      let bestScore = 0;
+      parts.forEach((pt, i) => {
+        const score = [...words(`${pt.title} ${pt.unit_subtopic ?? ''}`)].filter((x) => w.has(x)).length;
+        if (score > bestScore) [best, bestScore] = [i, score];
+      });
+      return best;
+    };
+    const childPart = new Map<string, number>();
+    const unitPart = new Map<string, number>();
+    parts.forEach((pt, i) => {
+      for (const c of pt.children) if (childKey.has(c) && !childPart.has(childKey.get(c)!.id)) childPart.set(childKey.get(c)!.id, i);
+      for (const u of pt.units) if (unitKey.has(u) && !unitPart.has(unitKey.get(u)!.id)) unitPart.set(unitKey.get(u)!.id, i);
+    });
+    for (const k of kids) if (!childPart.has(k.id)) childPart.set(k.id, closest(k.title));
+    for (const u of units) if (!unitPart.has(u.id)) unitPart.set(u.id, closest((u.summaryBullets as { title: string }).title));
+
+    const norm = (x: string) => x.trim().toLocaleLowerCase('und');
+    await db.transaction(async (tx) => {
+      const current = await lockChat(tx, chat.id);
+      const live = await loadTree(tx, chat.id);
+      const node = live.nodes.get(t.id);
+      if (!node || node.parentId !== t.parentId) return;
+      const siblings = live.nodes.get(t.parentId!)!.childIds.map((c) => live.nodes.get(c)!);
+      const newTopic = async (parentId: string, title: string) =>
+        (await tx.insert(s.topics).values({ workspaceId: chat.workspaceId, chatId: chat.id, root: t.root, kind: 'TOPIC', parentId, title: title.trim().slice(0, 80), provenance: 'model', taxonomyVersion: current.taxonomyVersion }).returning({ id: s.topics.id }))[0].id;
+      // Each part reuses a sibling of the same name ("Career" may already exist) or is created beside the old topic.
+      const partIds: string[] = [];
+      const holderIds: string[] = [];
+      for (const pt of parts) {
+        const same = siblings.find((x) => x.id !== t.id && norm(x.title) === norm(pt.title));
+        const id = same?.id ?? (await newTopic(t.parentId!, pt.title));
+        partIds.push(id);
+        // Discussions sit one level down when the model named a narrower topic for them ("Academic guidance").
+        const sub = pt.unit_subtopic?.trim();
+        const hasUnits = units.some((u) => unitPart.get(u.id) === partIds.length - 1);
+        if (sub && hasUnits && norm(sub) !== norm(pt.title)) {
+          const existing = same ? live.nodes.get(same.id)!.childIds.map((c) => live.nodes.get(c)!).find((x) => norm(x.title) === norm(sub)) : undefined;
+          holderIds.push(existing?.id ?? (await newTopic(id, sub)));
+        } else holderIds.push(id);
+      }
+      for (const k of kids) await tx.update(s.topics).set({ parentId: partIds[childPart.get(k.id)!], updatedAt: new Date() }).where(and(eq(s.topics.id, k.id), eq(s.topics.parentId, t.id)));
+      for (const u of units) {
+        const to = holderIds[unitPart.get(u.id)!];
+        await tx.update(s.analysisUnits).set({ assignedTopicId: to }).where(eq(s.analysisUnits.id, u.id));
+        const [disc] = await tx.select().from(s.discussions).where(and(eq(s.discussions.chatId, chat.id), eq(s.discussions.unitKey, u.id)));
+        if (!disc) continue;
+        await tx.update(s.discussions).set({ topicId: to, taxonomyVersion: current.taxonomyVersion }).where(eq(s.discussions.id, disc.id));
+        await tx.execute(sql`
+          UPDATE placements SET topic_id = ${to}::uuid WHERE discussion_id = ${disc.id}::uuid AND topic_id = ${t.id}::uuid
+            AND NOT EXISTS (SELECT 1 FROM placements p2 WHERE p2.topic_id = ${to}::uuid AND p2.message_id = placements.message_id)`);
+      }
+      // Remaining placements (e.g. shared files) go to the first part; then the old topic retires into it.
+      await tx.execute(sql`
+        INSERT INTO placements (workspace_id, chat_id, message_id, topic_id, discussion_id, is_primary, provenance, locked, analyzed_revision, taxonomy_version)
+        SELECT workspace_id, chat_id, message_id, ${partIds[0]}::uuid, discussion_id, is_primary, provenance, locked, analyzed_revision, taxonomy_version
+        FROM placements WHERE topic_id = ${t.id}::uuid
+        ON CONFLICT (topic_id, message_id) DO NOTHING`);
+      await tx.delete(s.placements).where(eq(s.placements.topicId, t.id));
+      await tx.update(s.discussions).set({ topicId: partIds[0] }).where(eq(s.discussions.topicId, t.id));
+      await tx.update(s.topics).set({ parentId: partIds[0], updatedAt: new Date() }).where(and(eq(s.topics.parentId, t.id), isNull(s.topics.retiredInto)));
+      await tx.update(s.topics).set({ retiredInto: partIds[0], updatedAt: new Date() }).where(eq(s.topics.id, t.id));
+      await tx.update(s.topicMergeMap).set({ survivingId: partIds[0] }).where(eq(s.topicMergeMap.survivingId, t.id));
+      await tx.insert(s.topicMergeMap).values({ retiredId: t.id, survivingId: partIds[0], chatId: chat.id });
+      await tx.execute(sql`UPDATE cross_chat_links SET a_topic_id = ${partIds[0]}::uuid WHERE a_topic_id = ${t.id}::uuid
+        AND NOT EXISTS (SELECT 1 FROM cross_chat_links x WHERE x.a_topic_id = ${partIds[0]}::uuid AND x.b_topic_id = cross_chat_links.b_topic_id AND x.relation_type = cross_chat_links.relation_type)`);
+      await tx.execute(sql`UPDATE cross_chat_links SET b_topic_id = ${partIds[0]}::uuid WHERE b_topic_id = ${t.id}::uuid
+        AND NOT EXISTS (SELECT 1 FROM cross_chat_links x WHERE x.b_topic_id = ${partIds[0]}::uuid AND x.a_topic_id = cross_chat_links.a_topic_id AND x.relation_type = cross_chat_links.relation_type)`);
+      await tx.delete(s.crossChatLinks).where(sql`${s.crossChatLinks.aTopicId} = ${t.id}::uuid OR ${s.crossChatLinks.bTopicId} = ${t.id}::uuid`);
+      const [g] = await tx.update(s.chats).set({ graphVersion: sql`${s.chats.graphVersion} + 1` }).where(eq(s.chats.id, chat.id)).returning({ v: s.chats.graphVersion });
+      await notifyChange(tx, { ws: chat.workspaceId, kind: 'graph', chatId: chat.id, version: g.v });
+      split++;
+    });
+  }
+  return split;
+}
+
+/** Child topics of a node that may be grouped (Needs review stays put). */
+function groupable(tree: Tree, n: TreeNode): TreeNode[] {
+  return n.childIds.map((c) => tree.nodes.get(c)!).filter((k) => k.kind === 'TOPIC' && !k.needsReview);
+}
+
+/** Nodes showing more than MAX_CHILD_TOPICS children, widest first. */
+function overfull(tree: Tree) {
+  return [...tree.nodes.values()]
+    .map((n) => ({ n, kids: groupable(tree, n) }))
+    .filter((x) => x.n.childIds.length > MAX_CHILD_TOPICS && x.kids.length >= 2)
+    .sort((a, b) => b.kids.length - a.kids.length);
+}
+
+/**
+ * Keeps every level readable: groups sibling topics that share a broader subject
+ * under one parent, and brings any level over MAX_CHILD_TOPICS back under the
+ * limit. With `tidy`, levels of REGROUP_MIN_CHILDREN or more are also offered for
+ * grouping. Returns how many topics moved.
+ */
+export async function regroupTopics(deps: PipelineDeps, job: Job, chat: Chat, opts: { tidy?: boolean } = { tidy: true }): Promise<number> {
+  let moved = 0;
+  for (let pass = 0; pass < REGROUP_MAX_PASSES; pass++) {
+    const m = await regroupPass(deps, job, chat, Boolean(opts.tidy) && pass === 0);
+    moved += m;
+    if (!m || !overfull(await loadTree(deps.db, chat.id)).length) break;
+  }
+  return moved + (await capLevels(deps.db, chat));
+}
+
+async function regroupPass(deps: PipelineDeps, job: Job, chat: Chat, tidy: boolean): Promise<number> {
+  const { db } = deps;
+  const tree = await loadTree(db, chat.id);
+  const locked = await lockedTopicIds(db, chat.id);
+  const over = overfull(tree);
+  const overIds = new Set(over.map((x) => x.n.id));
+  const extra = tidy
+    ? [...tree.nodes.values()]
+        .filter((n) => !overIds.has(n.id))
+        .map((n) => ({ n, kids: groupable(tree, n) }))
+        .filter((x) => x.kids.length >= REGROUP_MIN_CHILDREN)
+        .sort((a, b) => b.kids.length - a.kids.length)
+        .slice(0, REGROUP_MAX_PARENTS)
+    : [];
+  const crowded = [...over, ...extra];
+  if (!crowded.length) return 0;
+  const counts = new Map(
+    (await db.execute<{ id: string; n: number }>(sql`SELECT assigned_topic_id AS id, count(*)::int AS n FROM analysis_units WHERE chat_id = ${chat.id}::uuid AND assigned_topic_id IS NOT NULL GROUP BY 1`)).rows.map((r) => [r.id, r.n]),
+  );
+  const examples = new Map<string, string[]>();
+  for (const d of await db.select({ topicId: s.discussions.topicId, title: s.discussions.title }).from(s.discussions).where(eq(s.discussions.chatId, chat.id))) {
+    if (!d.topicId) continue;
+    const list = examples.get(d.topicId) ?? [];
+    if (list.length < 3) examples.set(d.topicId, [...list, d.title]);
+  }
+  const norm = (t: string) => t.trim().toLocaleLowerCase('und');
+  let moved = 0;
+  for (const { n, kids } of crowded) {
+    const keyOf = new Map(kids.map((k, i) => [`c${i + 1}`, k]));
+    const parentPath = ancestors(tree, n.id).map((a) => a.title).join(' > ');
+    // Needs review also takes room on the level.
+    const max = Math.max(2, MAX_CHILD_TOPICS - (n.childIds.length - kids.length));
+    const p = regroupPrompt(chat.title, parentPath, [...keyOf].map(([key, k]) => ({ key, title: k.title, units: counts.get(k.id) ?? 0, examples: examples.get(k.id) ?? [] })), max);
+    const r = await callModel(deps, { workspaceId: job.workspaceId, logicalJobId: job.logicalJobId, jobId: job.id }, { role: 'balanced', operation: 'regroup', ...p, schema: RegroupSchema, schemaName: 'regroup', jsonSchema: JSON_SCHEMAS.regroup, maxOutputTokens: 2000 });
+    const used = new Set<string>();
+    const plans: GroupPlan[] = [];
+    for (const g of r.value.groups) {
+      // An existing sibling with the group's title becomes the parent ("Hackathon" absorbs its projects).
+      if (!isTopicTitle(g.title)) continue;
+      const into = kids.find((k) => norm(k.title) === norm(g.title)) ?? null;
+      if (into && used.has(into.id)) continue;
+      const movers = [...new Set(g.children)].map((c) => keyOf.get(c)).filter((k): k is TreeNode => Boolean(k) && k!.id !== into?.id && !used.has(k!.id) && !locked.has(k!.id));
+      // Worth a level: two or more topics move, and not the whole level at once.
+      if (movers.length < (into ? 1 : 2) || movers.length + (into ? 1 : 0) >= kids.length) continue;
+      for (const m of movers) used.add(m.id);
+      if (into) used.add(into.id);
+      plans.push({ title: g.title.trim(), into, movers });
+    }
+    if (plans.length) moved += await moveUnder(db, chat, n, plans);
+  }
+  return moved;
+}
+
+interface GroupPlan {
+  title: string;
+  into: TreeNode | null;
+  movers: TreeNode[];
+}
+
+/** Moves each plan's topics under its existing sibling (`into`) or a new topic titled `title`. */
+async function moveUnder(db: Db, chat: Chat, n: TreeNode, plans: GroupPlan[]): Promise<number> {
+  return db.transaction(async (tx) => {
+    const current = await lockChat(tx, chat.id);
+    let moved = 0;
+    for (const pl of plans) {
+      const parentId =
+        pl.into?.id ??
+        (await tx.insert(s.topics).values({ workspaceId: chat.workspaceId, chatId: chat.id, root: n.root, kind: 'TOPIC', parentId: n.id, title: pl.title, provenance: 'model', taxonomyVersion: current.taxonomyVersion }).returning({ id: s.topics.id }))[0].id;
+      const r2 = await tx
+        .update(s.topics)
+        .set({ parentId, updatedAt: new Date() })
+        .where(and(inArray(s.topics.id, pl.movers.map((m) => m.id)), eq(s.topics.parentId, n.id), eq(s.topics.parentLocked, false)))
+        .returning({ id: s.topics.id });
+      moved += r2.length;
+    }
+    const [g] = await tx.update(s.chats).set({ graphVersion: sql`${s.chats.graphVersion} + 1` }).where(eq(s.chats.id, chat.id)).returning({ v: s.chats.graphVersion });
+    await notifyChange(tx, { ws: chat.workspaceId, kind: 'graph', chatId: chat.id, version: g.v });
+    return moved;
+  });
+}
+
+/**
+ * Last resort when the model leaves a level too wide: the biggest topics stay,
+ * the rest move under "Other topics" on that level.
+ */
+async function capLevels(db: Db, chat: Chat): Promise<number> {
+  let moved = 0;
+  for (let i = 0; i < REGROUP_MAX_PASSES; i++) {
+    const tree = await loadTree(db, chat.id);
+    const over = overfull(tree);
+    if (!over.length) break;
+    const locked = await lockedTopicIds(db, chat.id);
+    const direct = new Map(
+      (await db.execute<{ id: string; n: number }>(sql`SELECT topic_id AS id, count(DISTINCT message_id)::int AS n FROM placements WHERE chat_id = ${chat.id}::uuid GROUP BY 1`)).rows.map((r) => [r.id, r.n]),
+    );
+    const size = (id: string): number => (direct.get(id) ?? 0) + tree.nodes.get(id)!.childIds.reduce((a, c) => a + size(c), 0);
+    let round = 0;
+    for (const { n, kids } of over) {
+      const other = kids.find((k) => k.title === OTHER_TOPICS) ?? null;
+      // Room left on the level once Needs review and "Other topics" are counted.
+      const keep = Math.max(1, MAX_CHILD_TOPICS - (n.childIds.length - kids.length) - 1);
+      const movers = kids
+        .filter((k) => k.id !== other?.id && !locked.has(k.id))
+        .sort((a, b) => size(b.id) - size(a.id))
+        .slice(keep);
+      if (movers.length < (other ? 1 : 2)) continue;
+      round += await moveUnder(db, chat, n, [{ title: OTHER_TOPICS, into: other, movers }]);
+    }
+    if (!round) break;
+    moved += round;
+  }
+  return moved;
+}
+
+/** Queues refinement for topics that still hold many discussions directly. */
+export async function scheduleDeepening(db: Db, job: Job, chatId: string): Promise<string[]> {
+  const tree = await loadTree(db, chatId);
+  const crowded = await db.execute<{ topic_id: string; n: number }>(sql`
+    SELECT u.assigned_topic_id AS topic_id, count(*)::int AS n FROM analysis_units u JOIN topics t ON t.id = u.assigned_topic_id
+    WHERE u.chat_id = ${chatId}::uuid AND t.kind = 'TOPIC' AND NOT t.needs_review AND t.retired_into IS NULL
+    GROUP BY 1 HAVING count(*) >= ${DEEPEN_MIN_UNITS} ORDER BY 2 DESC`);
+  const out: string[] = [];
+  for (const r of crowded.rows) {
+    if (out.length >= DEEPEN_MAX_TOPICS) break;
+    const node = tree.nodes.get(r.topic_id);
+    if (!node || node.depth >= DEEPEN_MAX_DEPTH) continue;
+    const [last] = await db.select().from(s.taxonomyFrontiers).where(eq(s.taxonomyFrontiers.parentTopicId, r.topic_id)).orderBy(desc(s.taxonomyFrontiers.createdAt)).limit(1);
+    if (last && last.status !== 'completed' && last.status !== 'failed') continue; // already queued or paused
+    const prev = (last?.checkpoint ?? {}) as { newTopics?: number; units?: number };
+    // Refined before without a useful split, and not much has been added since.
+    if (last?.status === 'completed' && !prev.newTopics && (prev.units ?? 0) * 1.5 > r.n) continue;
+    if (last?.status === 'failed' && last.createdAt > new Date(Date.now() - 60 * 60_000)) continue;
+    const units = await db.select({ refs: s.analysisUnits.messageRefs }).from(s.analysisUnits).where(eq(s.analysisUnits.assignedTopicId, r.topic_id));
+    const refs = units.flatMap((u) => u.refs);
+    const [chat] = await db.select().from(s.chats).where(eq(s.chats.id, chatId));
+    // Each refinement gets its own ledger, so a deep map is not cut short by one job's call cap.
+    const logicalJobId = crypto.randomUUID();
+    const [fr] = await db
+      .insert(s.taxonomyFrontiers)
+      .values({ workspaceId: chat.workspaceId, chatId, logicalJobId, parentTopicId: r.topic_id, inputMessages: refs, checkpoint: { deepen: true } })
+      .onConflictDoNothing()
+      .returning({ id: s.taxonomyFrontiers.id });
+    if (!fr) continue;
+    const [rj] = await db
+      .insert(s.analysisJobs)
+      .values({ workspaceId: chat.workspaceId, chatId, kind: 'refine', logicalJobId, inputFingerprint: sha256(`refine|${fr.id}`), inputMessages: refs, pipelineVersion: PIPELINE_VERSION, deletionGeneration: chat.deletionGeneration, selectionEpoch: chat.selectionEpoch, result: { frontierId: fr.id } })
+      .returning({ id: s.analysisJobs.id });
+    out.push(rj.id);
+  }
+  void job;
+  return out;
 }
 
 export { ROOT_LABELS };

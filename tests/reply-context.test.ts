@@ -98,8 +98,14 @@ describe('reply-aware analysis', () => {
     // --- What the assignment model was shown ---
     const assign = provider.requests.find((r) => r.operation === 'assign');
     expect(assign).toBeDefined();
-    const units = (JSON.parse(assign!.user) as { units: UnitDigest[] }).units;
-    expect(units.some((x) => x.reply_topics?.includes(target.topic_id))).toBe(true);
+    // Topics are sent as short keys (t1…); the reply's key must name the quoted message's topic.
+    const shown = JSON.parse(assign!.user) as { units: UnitDigest[]; candidates: { id: string; path: string }[] };
+    const replyKeys = shown.units.flatMap((x) => x.reply_topics ?? []);
+    expect(replyKeys.length).toBeGreaterThan(0);
+    const replyPaths = shown.candidates.filter((c) => replyKeys.includes(c.id)).map((c) => c.path);
+    expect(replyPaths.some((p) => p.endsWith('Refresh flow'))).toBe(true);
+    // No full topic ids reach the model.
+    expect(assign!.user).not.toContain(target.topic_id);
 
     // --- Outcome: the reply joins the quoted message's topic; the identical unlinked text does not ---
     const primaryOf = async (nativeId: string) => {

@@ -49,6 +49,7 @@ export interface ChatSummary {
   title: string;
   kind: string;
   source: string;
+  avatar_url: string | null;
   selected: boolean;
   paused: boolean;
   message_count: number;
@@ -80,6 +81,8 @@ export interface ContentFile {
   filename: string | null;
   size: number | null;
   availability: string;
+  has_preview: boolean;
+  description: string | null;
   sent_at: string | null;
   sender: string;
   topic_paths: PathItem[][];
@@ -114,6 +117,6 @@ export interface SourceMessage {
   review: 'read' | 'missed';
   reviewable: boolean;
   topic_paths: { primary: boolean; path: PathItem[] }[];
-  attachments: { id: string; media_type: string; mime: string | null; filename: string | null; size: number | null; availability: string }[];
-  context: { message_id: string; sender: string; snippet: string | null; sent_at: string | null; label: string }[];
+  attachments: { id: string; media_type: string; mime: string | null; filename: string | null; size: number | null; availability: string; has_preview: boolean; description: string | null }[];
+  context: { message_id: string; sender: string; direction: string; current: boolean; snippet: string | null; sent_at: string | null }[];
 }

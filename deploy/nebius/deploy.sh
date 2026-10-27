@@ -23,7 +23,7 @@ load() { cat "$STATE_DIR/$1" 2>/dev/null || true; }
 # Runtime secret keys injected with --env-secret KEY=<secret>; each KEY must be a payload key.
 SECRET_NAME=${SECRET_NAME:-threadmap-runtime}
 SECRET_KEYS=(DATABASE_URL COMPANION_DATABASE_URL WORKER_DATABASE_URL BETTER_AUTH_SECRET WHATSAPP_AUTH_ENCRYPTION_KEY NEBIUS_API_KEY S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY DATABASE_CA_CERT)
-ADMIN_SECRET_NAME=${ADMIN_SECRET_NAME:-threadmap-admin}   # MIGRATION_DATABASE_URL, OWNER_PASSWORD
+ADMIN_SECRET_NAME=${ADMIN_SECRET_NAME:-threadmap-admin}   # MIGRATION_DATABASE_URL
 
 cmd=${1:-validate}
 case "$cmd" in
@@ -41,7 +41,7 @@ ThreadMap resource plan (nothing created yet)
   postgres          : $PG_CLUSTER_NAME (existing; private RW endpoint, sslmode verify-full, CA from msp-certs)
   object storage    : https://storage.$NEBIUS_CLOUD_REGION.nebius.cloud bucket $S3_BUCKET (private)
   secrets           : SecretStash '$SECRET_NAME' (${SECRET_KEYS[*]}) and '$ADMIN_SECRET_NAME'
-  admin path        : one-off Serverless Jobs in the same subnet (migrate, bootstrap-origin, create-owner)
+  admin path        : one-off Serverless Jobs in the same subnet (migrate, bootstrap-origin)
   budget (owner)    : \$$INFRA_BUDGET_USD_PER_DAY/day infrastructure; LLM caps are separate and do not bound cloud charges
 EOF
   "$NEBIUS" msp postgresql v1alpha1 cluster get-by-name --name "$PG_CLUSTER_NAME" --format jsonpath='{.status.connection_endpoints.private_read_write}' >/dev/null \
@@ -54,8 +54,8 @@ secrets)
   req "${SECRET_KEYS[@]}"
   payload=$(node -e 'const ks=process.argv.slice(1);console.log(JSON.stringify(ks.map(k=>({key:k,string_value:process.env[k]}))))' "${SECRET_KEYS[@]}")
   "$NEBIUS" mysterybox secret create --name "$SECRET_NAME" --description "ThreadMap runtime secrets" --secret-version-payload "$payload"
-  req MIGRATION_DATABASE_URL OWNER_PASSWORD
-  apayload=$(node -e 'console.log(JSON.stringify(["MIGRATION_DATABASE_URL","OWNER_PASSWORD","DATABASE_CA_CERT"].map(k=>({key:k,string_value:process.env[k]}))))')
+  req MIGRATION_DATABASE_URL
+  apayload=$(node -e 'console.log(JSON.stringify(["MIGRATION_DATABASE_URL","DATABASE_CA_CERT"].map(k=>({key:k,string_value:process.env[k]}))))')
   "$NEBIUS" mysterybox secret create --name "$ADMIN_SECRET_NAME" --description "ThreadMap admin (migrations/bootstrap)" --secret-version-payload "$apayload"
   ;;
 
@@ -71,7 +71,7 @@ image)
   echo "immutable image: $digest_ref"
   ;;
 
-migrate|bootstrap|owner)
+migrate|bootstrap)
   confirm
   req NEBIUS_CLOUD_SUBNET_ID NEBIUS_ENDPOINT_PLATFORM NEBIUS_ENDPOINT_PRESET
   image=$(load image); [[ -n "$image" ]] || { echo "run 'image' first" >&2; exit 2; }
@@ -85,10 +85,6 @@ migrate|bootstrap|owner)
       url=$(load url); did=$(load deployment_id); [[ -n "$url" && -n "$did" ]] || { echo "run 'endpoint' and 'url' first" >&2; exit 2; }
       "$NEBIUS" ai job create --name "threadmap-bootstrap-$(date +%s)" "${common[@]}" --env "IMAGE_DIGEST=${image##*@}" \
         --container-command "sh" --args "-c 'DATABASE_URL=\$MIGRATION_DATABASE_URL node dist/cli/bootstrap-origin.js $did $url'" ;;
-    owner)
-      req OWNER_EMAIL
-      "$NEBIUS" ai job create --name "threadmap-owner-$(date +%s)" "${common[@]}" --env "OWNER_EMAIL=$OWNER_EMAIL" --env-secret "OWNER_PASSWORD=$ADMIN_SECRET_NAME" \
-        --container-command "sh" --args "-c 'DATABASE_URL=\$MIGRATION_DATABASE_URL node dist/cli/create-owner.js'" ;;
   esac
   echo "follow with: $NEBIUS ai job list  then  $NEBIUS ai job logs <job_ID> --follow"
   ;;
@@ -102,7 +98,7 @@ endpoint)
         --env STORAGE_DRIVER=s3 --env "S3_ENDPOINT=https://storage.$NEBIUS_CLOUD_REGION.nebius.cloud" --env "S3_REGION=$NEBIUS_CLOUD_REGION" --env "S3_BUCKET=$S3_BUCKET"
         --env SOURCE_PROVIDER=baileys --env LLM_PROVIDER=nebius --env "NEBIUS_MODEL_REASONING=$NEBIUS_MODEL_REASONING" --env "NEBIUS_MODEL_FAST=$NEBIUS_MODEL_FAST"
         --env "NEBIUS_MODEL_BALANCED=$NEBIUS_MODEL_BALANCED" --env "NEBIUS_JSON_SCHEMA_ROLES=${NEBIUS_JSON_SCHEMA_ROLES:-}"
-        --env ALLOW_PUBLIC_SIGNUP=false --env PUBLIC_DEMO_ENABLED=true --env PUBLIC_DEMO_PAIRING_ENABLED=false --env WHATSAPP_PAIRING_ENABLED=true
+        --env PUBLIC_DEMO_ENABLED=true --env PUBLIC_DEMO_PAIRING_ENABLED=false --env WHATSAPP_PAIRING_ENABLED=true
         --env MAP_DEFAULT_TOPIC_DEPTH=2 --env MAP_MAX_VISIBLE_NODES=200 --env MAP_CONTENT_PAGE_SIZE=50
         --env MAP_NODE_MIN_DIAMETER_PX=64 --env MAP_NODE_MAX_DIAMETER_PX=220 --env MAP_NODE_SIZE_REFERENCE_COUNT=10000
         --env "LLM_MAX_USD_PER_JOB=${LLM_MAX_USD_PER_JOB:-1.00}" --env "LLM_MAX_USD_PER_DAY=${LLM_MAX_USD_PER_DAY:-5.00}" --env "LLM_MAX_CALLS_PER_JOB=${LLM_MAX_CALLS_PER_JOB:-100}")

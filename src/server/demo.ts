@@ -21,9 +21,13 @@ export async function ensureDemoWorkspace(db: Db, userId: string) {
   return ws;
 }
 
-/** Remove expired demo workspaces; deleting the guest user cascades to all its data. */
+/**
+ * Remove expired demo workspaces and WhatsApp link attempts that were never
+ * scanned; deleting the anonymous user cascades to all its data. Claimed
+ * accounts are not anonymous and have no expiry, so they are never touched.
+ */
 export async function purgeExpiredDemos(db: Db) {
-  const expired = await db.select().from(s.workspaces).where(and(eq(s.workspaces.mode, 'demo'), lt(s.workspaces.expiresAt, new Date())));
+  const expired = await db.select().from(s.workspaces).where(lt(s.workspaces.expiresAt, new Date()));
   for (const w of expired) {
     await db.execute(sql`DELETE FROM "user" WHERE id = ${w.ownerUserId} AND is_anonymous`);
   }

@@ -6,7 +6,7 @@ Placeholders in `<angle brackets>` must be replaced with real, observed values. 
 
 **ThreadMap: find anything in a busy WhatsApp chat — and see how your chats connect.**
 
-Useful ideas and resources disappear inside busy group chats. ThreadMap links to WhatsApp as a linked device (owner scans a QR), captures only the chats you select, and turns each one into a map with three fixed roots: Knowledge, General Chat and Resources. NVIDIA Nemotron models on Nebius Token Factory build a recursive, evidence-backed topic hierarchy — Programming → Hackathons → Solutions → Authentication → Tokens → Refresh flow — that goes as deep as the content supports and no deeper.
+Useful ideas and resources disappear inside busy group chats. ThreadMap links to WhatsApp as a linked device (owner scans a QR), captures only the chats you select, and turns each one into a map with four fixed roots: Knowledge, General Chat, Events and Activities, and Resources. NVIDIA Nemotron models on Nebius Token Factory build a recursive, evidence-backed topic hierarchy — Programming → Hackathons → Solutions → Authentication → Tokens → Refresh flow — that goes as deep as the content supports and no deeper.
 
 - Every node's size reflects the exact number of matching messages in its whole subtree, on one shared compressed scale, with the exact count shown.
 - *Show depth* changes only what is drawn: counts, sizes and contents stay identical. Click any root or topic to read the matching messages and files from all deeper levels without expanding anything.
@@ -14,7 +14,7 @@ Useful ideas and resources disappear inside busy group chats. ThreadMap links to
 - Read/Missed is per user and revision-aware: a message you read and is later edited becomes Missed again; date + topic + Missed filters agree across map, lists, search and counts.
 - Related topics across chats are proposed from shared links and keywords and verified by Nemotron Super with evidence on both sides.
 
-**Models:** Nemotron 3 Ultra builds and refines the taxonomy in bounded steps with a persisted refinement frontier; Nemotron 3 Nano does routine extraction and assignment; Nemotron 3 Super repairs invalid output, resolves ambiguous placements and verifies cross-chat links. Exact model IDs: `<from reports/live-inference.json>`.
+**Models:** Nemotron 3 Super builds and refines the taxonomy in windows of up to 40 discussions with a persisted refinement frontier, and groups related topics; Nemotron 3 Nano does routine extraction and assignment; Super also repairs invalid output, resolves ambiguous placements and verifies cross-chat links. Exact model IDs: `<from reports/live-inference.json>`.
 
 **Nebius:** the whole app — Next.js web/API, a long-running Baileys companion and a pg-boss AI worker — runs as one image on a regular CPU **Nebius Serverless Endpoint** (`<https URL>`, image `<digest>`), with Managed PostgreSQL, private Object Storage and SecretStash. Closing your browser or turning off your laptop does not stop capture.
 
@@ -42,8 +42,8 @@ Useful ideas and resources disappear inside busy group chats. ThreadMap links to
 | --- | --- | --- |
 | 0:00–0:15 | A busy group chat scrolling | "Great ideas and links vanish in busy chats. ThreadMap gets them back." |
 | 0:15–0:35 | Hosted URL (address bar visible), status Connected; phone sends a message; it appears without refresh | "ThreadMap runs on a Nebius Serverless Endpoint as a WhatsApp linked device. New messages arrive live." (QR never shown) |
-| 0:35–1:05 | Map: large Knowledge node; expand to Programming → Hackathons → Solutions → … → Refresh flow; open file | "Nemotron Ultra built this hierarchy as deep as the evidence goes. Size = matching messages, exact counts on every node." |
+| 0:35–1:05 | Map: large Knowledge node; expand to Programming → Hackathons → Solutions → … → Refresh flow; open file | "Nemotron Super built this hierarchy as deep as the evidence goes. Size = matching messages, exact counts on every node." |
 | 1:05–1:30 | Show depth 1; open Programming → Files → deep PDF; apply Date + Topic + Missed | "Depth only changes the view. From one level down I can still open a file six levels deep. Filters agree everywhere." |
 | 1:30–1:55 | Related chats tab → jump to study group; evidence both sides | "Nemotron Super verifies links between chats, with evidence on both sides." |
 | 1:55–2:20 | Endpoint stop/start in console; same counts after restart; another phone message arrives | "State lives in Managed PostgreSQL and Object Storage — restart, and everything is still here." (label any replay segment) |
-| 2:20–2:45 | Model IDs + endpoint/digest from reports | "Nemotron Ultra, Nano and Super on Token Factory; one CPU Endpoint on Nebius. ThreadMap." |
+| 2:20–2:45 | Model IDs + endpoint/digest from reports | "Nemotron Nano and Super on Token Factory; one CPU Endpoint on Nebius. ThreadMap." |

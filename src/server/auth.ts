@@ -23,19 +23,20 @@ function build(db: Db, origin: string) {
       provider: 'pg',
       schema: { user: schema.user, session: schema.session, account: schema.account, verification: schema.verification },
     }),
-    emailAndPassword: { enabled: true, disableSignUp: !cfg.ALLOW_PUBLIC_SIGNUP, minPasswordLength: 12 },
+    // No passwords: scanning the WhatsApp QR is the sign-in (see startWhatsAppLogin).
+    emailAndPassword: { enabled: false },
     session: { expiresIn: 60 * 60 * 24 * 7 },
-    // Explicit limits: password sign-in stays strict; demo sessions allow a
+    // Anonymous sessions start both the demo and a WhatsApp link; allow a
     // classroom/judging burst from one network while still bounding abuse.
     rateLimit: {
       enabled: true,
       storage: 'memory', // single web process per Endpoint
       window: 60,
       max: 300,
-      customRules: { '/sign-in/email': { window: 60, max: 10 }, '/sign-in/anonymous': { window: 60, max: 30 } },
+      customRules: { '/sign-in/anonymous': { window: 60, max: 30 } },
     },
     advanced: { useSecureCookies: origin.startsWith('https://') },
-    plugins: cfg.PUBLIC_DEMO_ENABLED ? [anonymous({ emailDomainName: 'demo.threadmap.invalid' })] : [],
+    plugins: [anonymous({ emailDomainName: 'demo.threadmap.invalid' })],
   });
 }
 
@@ -71,18 +72,30 @@ export async function requireUser(req: Request, opts: { mutation?: boolean } = {
   if (!session) throw new SafeError('sign in required', 401, 'unauthenticated');
   const db = getDb();
   const u = session.user as { id: string; isAnonymous?: boolean | null };
-  const mode = u.isAnonymous ? 'demo' : 'private';
+  const mode = await workspaceModeFor(db, u);
   const [ws] = await db.select().from(schema.workspaces).where(and(eq(schema.workspaces.ownerUserId, u.id), eq(schema.workspaces.mode, mode)));
   if (!ws) {
     if (mode === 'demo') {
+      if (!loadAppConfig().PUBLIC_DEMO_ENABLED) throw new SafeError('the public demo is disabled on this deployment', 403, 'demo_disabled');
       const { ensureDemoWorkspace } = await import('./demo');
       const d = await ensureDemoWorkspace(db, u.id);
       return { userId: u.id, workspaceId: d.id, mode };
     }
     throw new SafeError('no workspace for this account', 403, 'no_workspace');
   }
-  if (ws.expiresAt && ws.expiresAt < new Date()) throw new SafeError('demo session expired; start a new demo', 401, 'expired');
+  if (ws.expiresAt && ws.expiresAt < new Date()) {
+    throw new SafeError(mode === 'demo' ? 'demo session expired; start a new demo' : 'this WhatsApp link attempt expired; scan again', 401, 'expired');
+  }
   return { userId: u.id, workspaceId: ws.id, mode };
+}
+
+/**
+ * A session with a private workspace (pending or claimed through WhatsApp) is
+ * private even while still anonymous; other anonymous sessions are demo guests.
+ */
+export async function workspaceModeFor(db: Db, u: { id: string; isAnonymous?: boolean | null }): Promise<'private' | 'demo'> {
+  const [priv] = await db.select({ id: schema.workspaces.id }).from(schema.workspaces).where(and(eq(schema.workspaces.ownerUserId, u.id), eq(schema.workspaces.mode, 'private')));
+  return priv || !u.isAnonymous ? 'private' : 'demo';
 }
 
 export function requireOwner(ctx: AuthCtx) {

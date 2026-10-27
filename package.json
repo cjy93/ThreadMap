@@ -17,7 +17,6 @@
     "db:migrate": "tsx src/cli/migrate.ts",
     "fixtures:generate": "tsx src/cli/generate-fixtures.ts",
     "fixtures:load": "tsx src/cli/load-fixtures.ts",
-    "owner:create": "tsx src/cli/create-owner.ts",
     "secrets:generate": "tsx src/cli/generate-secrets.ts",
     "models:discover": "tsx src/cli/discover-models.ts",
     "origin:bootstrap": "tsx src/cli/bootstrap-origin.ts",

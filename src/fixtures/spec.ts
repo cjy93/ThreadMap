@@ -1,5 +1,5 @@
 // Synthetic ThreadMap evaluation content (v1). All people, numbers and
-// identifiers are fictional. Topic paths use K/ G/ R/ for the three roots.
+// identifiers are fictional. Topic paths use K/ G/ E/ R/ for the four roots.
 // The fixture taxonomy here is the expected, evidence-supported hierarchy the
 // FixtureModelProvider reproduces; it is development data, not live evidence.
 
@@ -199,7 +199,7 @@ export const THREADS: ThreadSpec[] = [
   },
   {
     chat: 'builders',
-    topic: 'G/Coordination/Event planning',
+    topic: 'E/Event planning',
     discussion: 'Venue logistics',
     lines: [
       ['priya', 'The venue opens at 8am on Saturday; bring extension cords.'],
@@ -337,7 +337,7 @@ export const THREADS: ThreadSpec[] = [
   },
   {
     chat: 'study',
-    topic: 'G/Scheduling',
+    topic: 'E/Scheduling',
     discussion: 'Study session times',
     lines: [
       ['omar', 'Can we meet Thursday 7pm instead of Wednesday?'],
@@ -410,7 +410,7 @@ export const THREADS: ThreadSpec[] = [
   },
   {
     chat: 'music',
-    topic: 'G/Plans',
+    topic: 'E/Plans',
     discussion: 'Weekend plans',
     lines: [
       ['mei', 'Community choir rehearsal is moved to Sunday 3pm.'],
@@ -480,14 +480,14 @@ export const FILLER: Record<ChatKey, { topic: string; discussion: string; lines:
       ],
     },
     {
-      topic: 'G/Scheduling',
+      topic: 'E/Scheduling',
       discussion: 'Rescheduling',
       lines: ['Next week same time?', 'I have a lab on Tuesday', 'Friday morning works', 'Let us vote on a time', 'Moving to room 4'],
     },
   ],
   music: [
     {
-      topic: 'G/Plans',
+      topic: 'E/Plans',
       discussion: 'Catching up',
       lines: [
         'How was rehearsal?',
@@ -526,14 +526,14 @@ export const UPDATE_20: { chat: ChatKey; topic: string; discussion: string; spea
   { chat: 'builders', topic: 'G/Casual chat', discussion: 'Daily chatter', speaker: 'wei', text: 'Sounds good' },
   { chat: 'builders', topic: 'K/Programming/Hackathons/Tips', discussion: 'Hackathon tips', speaker: 'alex', text: 'Tip: freeze features six hours before judging.' },
   { chat: 'builders', topic: 'K/Programming/Python', discussion: 'Python tooling', speaker: 'priya', text: 'Ruff replaced three linters for us.' },
-  { chat: 'builders', topic: 'G/Coordination/Event planning', discussion: 'Venue logistics', speaker: 'sara', text: 'Venue wifi password is on the whiteboard.' },
+  { chat: 'builders', topic: 'E/Event planning', discussion: 'Venue logistics', speaker: 'sara', text: 'Venue wifi password is on the whiteboard.' },
   { chat: 'builders', topic: 'G/Casual chat', discussion: 'Daily chatter', speaker: 'me', text: 'Ordering dinner, any requests?' },
   { chat: 'builders', topic: 'K/Programming/Hackathons/Solutions/Authentication/OAuth providers', discussion: 'Choosing OAuth providers', speaker: 'alex', text: 'GitHub OAuth callback URL must match exactly, including the trailing slash.' },
   { chat: 'study', topic: 'K/Programming/Python/Generators', discussion: 'Generators vs lists', speaker: 'li', text: 'yield from delegates to a sub-generator, handy for recursion.' },
   { chat: 'study', topic: 'K/Programming/Python/Generators', discussion: 'Generators vs lists', speaker: 'me', text: 'Trying a generator pipeline for the log parser now.' },
   { chat: 'study', topic: 'K/Programming/Algorithms/Dynamic programming', discussion: 'DP patterns', speaker: 'omar', text: 'Edit distance is the same table idea as LCS.' },
-  { chat: 'study', topic: 'G/Scheduling', discussion: 'Study session times', speaker: 'omar', text: 'Thursday session confirmed.' },
-  { chat: 'study', topic: 'G/Scheduling', discussion: 'Study session times', speaker: 'me', text: 'See you Thursday.' },
+  { chat: 'study', topic: 'E/Scheduling', discussion: 'Study session times', speaker: 'omar', text: 'Thursday session confirmed.' },
+  { chat: 'study', topic: 'E/Scheduling', discussion: 'Study session times', speaker: 'me', text: 'See you Thursday.' },
   { chat: 'study', topic: 'K/Programming/Authentication/Tokens', discussion: 'Refresh tokens in the web dev module', speaker: 'li', text: '刷新令牌应该每次使用后轮换。' },
   { chat: 'study', topic: 'R/Web links', discussion: 'Practice sites', speaker: 'priya', text: 'Another practice site: https://exercism.org/tracks/python' },
   { chat: 'study', topic: 'G/Casual chat', discussion: 'Study banter', speaker: 'li', text: 'Good luck everyone' },

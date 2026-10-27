@@ -3,13 +3,17 @@
 // in bounded memory until expiry and are surfaced only to the owner workspace.
 import pg from 'pg';
 import { pgSslOptions } from './db';
-import { EVENTS_CHANNEL, QR_CHANNEL, type ChangeEvent } from './notify';
+import { ASK_REPLY_CHANNEL, EVENTS_CHANNEL, QR_CHANNEL, type ChangeEvent } from './notify';
 
 type Listener = (ev: { type: string; data: unknown }) => void;
 
 interface Hub {
   subs: Map<string, Set<Listener>>;
   qr: Map<string, { qr: string; expiresAt: number }>;
+  // Phone-number pairing codes, like QR payloads: owner-only, memory-only, short-lived.
+  codes?: Map<string, { code: string; expiresAt: number }>;
+  // Pending Ask requests awaiting the worker's reply, by request id.
+  asks?: Map<string, (reply: unknown) => void>;
   client?: pg.Client;
   starting?: Promise<void>;
 }
@@ -35,11 +39,20 @@ async function start(): Promise<void> {
     await client.connect();
     await client.query(`LISTEN ${EVENTS_CHANNEL}`);
     await client.query(`LISTEN ${QR_CHANNEL}`);
+    await client.query(`LISTEN ${ASK_REPLY_CHANNEL}`);
     client.on('notification', (n) => {
       try {
         const payload = JSON.parse(n.payload ?? '{}');
+        if (n.channel === ASK_REPLY_CHANNEL) {
+          const { id, ok, ...rest } = payload as { id: string; ok: boolean };
+          hub.asks?.get(id)?.(ok ? rest : null);
+          return;
+        }
         if (n.channel === QR_CHANNEL) {
-          const { ws, qr, ttlMs } = payload as { ws: string; qr: string | null; ttlMs?: number };
+          const { ws, qr, code, ttlMs } = payload as { ws: string; qr: string | null; code?: string; ttlMs?: number };
+          hub.codes ??= new Map();
+          if (code) hub.codes.set(ws, { code, expiresAt: Date.now() + Math.min(ttlMs ?? 180_000, 300_000) });
+          else if (!qr) hub.codes.delete(ws);
           if (qr) hub.qr.set(ws, { qr, expiresAt: Date.now() + Math.min(ttlMs ?? 60_000, 120_000) });
           else hub.qr.delete(ws);
           emit(ws, { type: 'qr', data: { available: Boolean(qr) } });
@@ -68,6 +81,36 @@ export async function subscribe(ws: string, l: Listener): Promise<() => void> {
   return () => {
     set.delete(l);
   };
+}
+
+/** Register for the worker's answer to an Ask request before sending it; resolves null on timeout. */
+export async function prepareAskReply(id: string, timeoutMs: number): Promise<{ reply: Promise<unknown> }> {
+  await start();
+  hub.asks ??= new Map();
+  const asks = hub.asks;
+  // Wrapped: an async function returning a bare promise would wait for the reply itself.
+  const reply = new Promise<unknown>((resolve) => {
+    const timer = setTimeout(() => {
+      asks.delete(id);
+      resolve(null);
+    }, timeoutMs);
+    asks.set(id, (reply) => {
+      clearTimeout(timer);
+      asks.delete(id);
+      resolve(reply);
+    });
+  });
+  return { reply };
+}
+
+export function currentPairingCode(ws: string): string | null {
+  const c = hub.codes?.get(ws);
+  if (!c) return null;
+  if (c.expiresAt < Date.now()) {
+    hub.codes!.delete(ws);
+    return null;
+  }
+  return c.code;
 }
 
 export function currentQr(ws: string): string | null {

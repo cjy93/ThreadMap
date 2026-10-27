@@ -29,7 +29,7 @@ export interface ManifestMessage {
 export interface ManifestTopic {
   key: string;
   chat: ChatKey;
-  root: 'KNOWLEDGE' | 'GENERAL_CHAT' | 'RESOURCES';
+  root: 'KNOWLEDGE' | 'GENERAL_CHAT' | 'EVENTS_ACTIVITIES' | 'RESOURCES';
   path: string;
   title: string;
   parentKey: string | null;
@@ -49,8 +49,8 @@ export interface Manifest {
   scenarios: Record<string, { description: string; refs: string[] }>;
 }
 
-const ROOT_OF: Record<string, ManifestTopic['root']> = { K: 'KNOWLEDGE', G: 'GENERAL_CHAT', R: 'RESOURCES' };
-const ROOT_TITLE: Record<string, string> = { K: 'Knowledge', G: 'General Chat', R: 'Resources' };
+const ROOT_OF: Record<string, ManifestTopic['root']> = { K: 'KNOWLEDGE', G: 'GENERAL_CHAT', E: 'EVENTS_ACTIVITIES', R: 'RESOURCES' };
+const ROOT_TITLE: Record<string, string> = { K: 'Knowledge', G: 'General Chat', E: 'Events and Activities', R: 'Resources' };
 const BASE_TIME = Date.UTC(2026, 8, 1, 1, 0, 0) / 1000; // 2026-09-01T01:00Z
 const UPDATE_TIME = Date.UTC(2026, 9, 20, 2, 0, 0) / 1000; // 2026-10-20T02:00Z
 

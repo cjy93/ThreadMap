@@ -168,6 +168,7 @@ export function normalizeWAMessage(msg: WAMessage, origin: IngestOrigin): Normal
   const base: Omit<MessageEvent, 'kind' | 'body' | 'attachments' | 'marker'> = {
     type: 'message',
     origin,
+    ...(msg.starred ? { starred: true } : {}),
     chatJid,
     chatJidAlt: bareJid(key.remoteJidAlt),
     chatKind,
@@ -207,6 +208,7 @@ export function normalizeWAMessage(msg: WAMessage, origin: IngestOrigin): Normal
         filename: (media as proto.Message.IDocumentMessage).fileName ?? null,
         size: toNum(media.fileLength as Longish),
         viewOnce: false,
+        thumbnailB64: mediaType === 'image' || mediaType === 'video' ? b64((media as proto.Message.IVideoMessage).jpegThumbnail) : null,
         mediaRef: JSON.stringify({
           field,
           mediaKey: b64(media.mediaKey),
@@ -269,6 +271,8 @@ export function normalizeMessageUpdate(u: WAMessageUpdate): NormalizedEvent {
       timeSec: toNum(upd.messageTimestamp as Longish),
     };
   }
+  // Starring on the phone syncs as an update carrying only the new star state.
+  if (typeof upd.starred === 'boolean') return { type: 'star', chatJid, targetNativeId: id, fromMe, starred: upd.starred };
   const edited = upd.message?.editedMessage?.message;
   if (edited) {
     const body = textOf(unwrap(edited).content) ?? textOf(edited);

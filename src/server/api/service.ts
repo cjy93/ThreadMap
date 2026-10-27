@@ -49,6 +49,8 @@ export async function listChats(db: Db, ctx: AuthCtx) {
       title: c.title,
       kind: c.kind,
       source: c.sourceKind,
+      // Same versioned photo URL as the chat picker, so the list shows who each chat is.
+      avatar_url: c.avatarKey ? `/api/chats/${c.id}/avatar?v=${c.avatarCheckedAt?.getTime() ?? 0}` : null,
       selected: c.selected,
       paused: c.paused,
       history_mode: c.historyMode,
@@ -144,7 +146,9 @@ export async function getNodeContent(db: Db, ctx: AuthCtx, chatId: string, nodeI
       const tree = await loadTree(tx, chatId);
       const [g] = await tx.select({ g: s.chats.graphVersion }).from(s.chats).where(eq(s.chats.id, chatId));
       const res = await nodeContent(tx, { userId: ctx.userId, workspaceId: ctx.workspaceId, chatId }, tree, g.g, filter, { nodeId, tab, cursor: params.get('cursor'), pageSize });
-      const summary = await nodeSummary(tx, chatId, nodeId, filter, params.get('full_summary') === '1');
+      // A topic's summary covers every discussion beneath it: grouping and refinement leave parents with none of their own.
+      const under = (id: string): string[] => [id, ...(tree.nodes.get(id)?.childIds ?? []).flatMap(under)];
+      const summary = await nodeSummary(tx, chatId, nodeId, tree.nodes.has(nodeId) ? under(nodeId) : [], filter, params.get('full_summary') === '1');
       return { ...res, summary };
     },
     { isolationLevel: 'repeatable read', accessMode: 'read only' },
@@ -152,19 +156,24 @@ export async function getNodeContent(db: Db, ctx: AuthCtx, chatId: string, nodeI
 }
 
 /**
- * Grounded summary claims for a node's own discussions. Prose summarizing the
- * whole topic is hidden when content filters narrow its input set, unless the
- * user explicitly asks for the full-topic summary (labeled with its coverage).
+ * Grounded summary claims for the discussions in a topic and every topic beneath
+ * it (`topicIds`), one per discussion first so a large branch shows a spread.
+ * Prose summarizing the whole topic is hidden when content filters narrow its
+ * input set, unless the user explicitly asks for the full-topic summary (labeled
+ * with its coverage).
  */
-async function nodeSummary(db: DbOrTx, chatId: string, nodeId: string, filter: ContentFilter, full: boolean) {
+async function nodeSummary(db: DbOrTx, chatId: string, nodeId: string, topicIds: string[], filter: ContentFilter, full: boolean) {
+  const topics = topicIds.length ? sql`ARRAY[${sql.join(topicIds.map((id) => sql`${id}::uuid`), sql`, `)}]` : sql`ARRAY[]::uuid[]`;
   const narrowed = filter.status !== 'all' || Boolean(filter.from || filter.to) || filter.topicIds.length > 0;
   const claims = await db.execute<{ id: string; text: string; evidence: { m: string; r: number }[]; inputs: number }>(sql`
-    SELECT c.id, c.text, jsonb_array_length(c.input_message_ids) AS inputs,
-      COALESCE((SELECT jsonb_agg(jsonb_build_object('m', e.message_id, 'r', e.revision)) FROM claim_evidence e WHERE e.claim_id = c.id), '[]'::jsonb) AS evidence
-    FROM summary_claims c
-    LEFT JOIN discussions d ON d.id = c.discussion_id
-    WHERE c.chat_id = ${chatId}::uuid AND c.valid AND (c.discussion_id = ${nodeId}::uuid OR d.topic_id = ${nodeId}::uuid)
-    ORDER BY c.created_at LIMIT 20`);
+    SELECT id, text, inputs, evidence FROM (
+      SELECT c.id, c.text, jsonb_array_length(c.input_message_ids) AS inputs, c.created_at,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('m', e.message_id, 'r', e.revision)) FROM claim_evidence e WHERE e.claim_id = c.id), '[]'::jsonb) AS evidence,
+        row_number() OVER (PARTITION BY c.discussion_id ORDER BY c.created_at) AS nth
+      FROM summary_claims c
+      LEFT JOIN discussions d ON d.id = c.discussion_id
+      WHERE c.chat_id = ${chatId}::uuid AND c.valid AND (c.discussion_id = ${nodeId}::uuid OR d.topic_id = ANY(${topics}))) x
+    ORDER BY nth, created_at LIMIT 20`);
   const available = claims.rows.length > 0;
   if (narrowed && !full) {
     return { coverage: 'hidden_for_filtered_view', available, claims: [] as typeof claims.rows, note: 'Summary covers all dates and review states; open "View full-topic summary" to see it.' };
@@ -182,17 +191,20 @@ export async function getMessage(db: Db, ctx: AuthCtx, messageId: string) {
   const atts = await db.select().from(s.attachments).where(eq(s.attachments.messageId, m.id)).orderBy(s.attachments.ordinal);
   const [rs] = await db.select().from(s.reviewState).where(and(eq(s.reviewState.userId, ctx.userId), eq(s.reviewState.messageId, m.id)));
   const ctxRows = m.sentAt
-    ? await db.execute<{ id: string; sender_label: string; body: string | null; sent_at: Date | null; kind: string; state: string }>(sql`
-        (SELECT id, sender_label, body, sent_at, kind, state FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) < (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at DESC, id DESC LIMIT 3)
+    ? await db.execute<{ id: string; sender_label: string; body: string | null; sent_at: Date | null; kind: string; state: string; direction: string }>(sql`
+        (SELECT id, sender_label, body, sent_at, kind, state, direction FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) < (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at DESC, id DESC LIMIT 5)
         UNION ALL
-        (SELECT id, sender_label, body, sent_at, kind, state FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) > (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at, id LIMIT 3)`)
+        (SELECT id, sender_label, body, sent_at, kind, state, direction FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) > (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at, id LIMIT 5)`)
     : { rows: [] };
   const isRead = rs?.status === 'read' && rs.reviewedRevision === m.contentRevision;
   const tombstoned = m.state !== 'active';
+  // In a one-to-one chat the other side is the chat itself, even when WhatsApp sent no name.
+  const senderOf = (label: string, direction: string) => (label === 'Unknown sender' && chat.kind === 'direct' && direction === 'incoming' ? chat.title : label);
+  const at = (d: Date | null) => (d ? new Date(d).getTime() : 0);
   return {
     message_id: m.id,
     chat: { id: chat.id, title: chat.title, kind: chat.kind },
-    sender: m.senderLabel,
+    sender: senderOf(m.senderLabel, m.direction),
     direction: m.direction,
     kind: m.kind,
     state: m.state,
@@ -207,10 +219,30 @@ export async function getMessage(db: Db, ctx: AuthCtx, messageId: string) {
     topic_paths: placements.filter((p) => tree.nodes.has(p.topicId)).map((p) => ({ primary: p.isPrimary, path: pathOf(tree, p.topicId) })),
     attachments: tombstoned
       ? []
-      : atts.map((a) => ({ id: a.id, media_type: a.mediaType, mime: a.detectedMime ?? a.declaredMime, filename: a.filename, size: a.byteCount ?? a.declaredSize, availability: a.availability })),
-    context: ctxRows.rows
-      .sort((a, b) => (a.sent_at && b.sent_at ? new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime() : 0))
-      .map((c) => ({ message_id: c.id, sender: c.sender_label, snippet: c.state === 'active' ? (c.body ?? '').slice(0, 200) : null, sent_at: c.sent_at ? new Date(c.sent_at).toISOString() : null, label: 'Context outside current filter' })),
+      : atts.map((a) => ({
+          id: a.id,
+          media_type: a.mediaType,
+          mime: a.detectedMime ?? a.declaredMime,
+          filename: a.filename,
+          size: a.byteCount ?? a.declaredSize,
+          availability: a.availability,
+          has_preview: a.thumbnail !== null,
+          description: a.aiDescription,
+        })),
+    // The conversation around this message, in order, with this message in its place.
+    context: [
+      ...ctxRows.rows.map((c) => ({ id: c.id, sender_label: c.sender_label, body: c.body, sent_at: c.sent_at, state: c.state, direction: c.direction, current: false })),
+      ...(m.sentAt ? [{ id: m.id, sender_label: m.senderLabel, body: m.body, sent_at: m.sentAt, state: m.state, direction: m.direction, current: true }] : []),
+    ]
+      .sort((a, b) => at(a.sent_at) - at(b.sent_at) || (a.id < b.id ? -1 : 1))
+      .map((c) => ({
+        message_id: c.id,
+        sender: senderOf(c.sender_label, c.direction),
+        direction: c.direction,
+        current: c.current,
+        snippet: c.state === 'active' ? (c.body ?? '').slice(0, 500) : null,
+        sent_at: c.sent_at ? new Date(c.sent_at).toISOString() : null,
+      })),
     route: `/chats/${m.chatId}/messages/${m.id}`,
   };
 }
@@ -404,5 +436,44 @@ export async function jobStatus(db: Db, ctx: AuthCtx, jobId: string) {
     created_at: j.createdAt.toISOString(),
     completed_at: j.completedAt?.toISOString() ?? null,
     budget: ledger ? { calls_used: ledger.callsUsed, max_calls: ledger.maxCalls, usd_used: ledger.usdMicrosUsed / 1e6, max_usd: ledger.maxUsdMicros / 1e6 } : null,
+  };
+}
+
+/**
+ * Messages the owner starred in WhatsApp, newest star first: in one chat, or in
+ * every opened chat. Stars follow the phone; ThreadMap only lists them.
+ */
+export async function listStarred(db: Db, ctx: AuthCtx, params: URLSearchParams) {
+  const chatParam = params.get('chat');
+  const chats = chatParam
+    ? [await requireChat(db, ctx, chatParam)]
+    : await db.select().from(s.chats).where(and(eq(s.chats.workspaceId, ctx.workspaceId), eq(s.chats.excluded, false), eq(s.chats.selected, true)));
+  if (!chats.length) return { messages: [] };
+  const titleOf = new Map(chats.map((c) => [c.id, c.title]));
+  const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; kind: string; sent_at: Date | null; starred_at: Date | null; content_revision: number; read: boolean }>(sql`
+    SELECT m.id, m.chat_id, m.sender_label, m.body, m.kind, m.sent_at, m.starred_at, m.content_revision,
+      EXISTS (SELECT 1 FROM review_state r WHERE r.user_id = ${ctx.userId} AND r.message_id = m.id AND r.status = 'read' AND r.reviewed_revision = m.content_revision) AS read
+    FROM messages m
+    WHERE m.chat_id IN (${sql.join(chats.map((c) => sql`${c.id}::uuid`), sql`, `)}) AND m.starred AND m.state = 'active'
+    ORDER BY m.starred_at DESC NULLS LAST, m.sent_at DESC NULLS LAST
+    LIMIT 500`);
+  const ids = rows.rows.map((r) => r.id);
+  const placed = ids.length ? await db.select({ messageId: s.placements.messageId, topicId: s.placements.topicId }).from(s.placements).where(and(inArray(s.placements.messageId, ids), eq(s.placements.isPrimary, true))) : [];
+  const trees = new Map(await Promise.all([...new Set(rows.rows.map((r) => r.chat_id))].map(async (c) => [c, await loadTree(db, c)] as const)));
+  return {
+    messages: rows.rows.map((r) => {
+      const tree = trees.get(r.chat_id)!;
+      const topic = placed.find((p) => p.messageId === r.id && tree.nodes.has(p.topicId));
+      return {
+        message_id: r.id,
+        chat_id: r.chat_id,
+        chat_title: titleOf.get(r.chat_id) ?? '',
+        sender: r.sender_label,
+        snippet: (r.body ?? (r.kind === 'media' ? '[media]' : '')).slice(0, 280),
+        sent_at: r.sent_at ? new Date(r.sent_at).toISOString() : null,
+        review: r.read ? 'read' : 'missed',
+        topic_path: topic ? pathOf(tree, topic.topicId).map((p) => p.title) : [],
+      };
+    }),
   };
 }

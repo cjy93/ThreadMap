@@ -6,7 +6,7 @@ Generated 25 Oct 2026. Branch `feat/threadmap-p0` (uncommitted working tree on b
 
 | Gate | Status | Reason |
 | --- | --- | --- |
-| **BUILD_READY** | **BLOCKED_EXTERNAL** | A18, A19, A20 need owner-supplied Token Factory key, Nebius AI Cloud project/IAM/budget, and owner QR pairing. A01–A17 pass locally. |
+| **BUILD_READY** | **BLOCKED_EXTERNAL** | A01–A18 pass (A18 live on Token Factory, 26 Oct). A19 needs owner QR pairing; A20 needs cloud hosting, which the owner deferred to an optional Phase 2 (app runs locally with Token Factory for Phase 1). |
 | **SUBMISSION_READY** | **BLOCKED_EXTERNAL** | Requires BUILD_READY, completed human review (UNREVIEWED), public repo/video/Devpost publication (prepared, not published). |
 
 ## Reproduce
@@ -28,7 +28,7 @@ Results observed on 25 Oct 2026: typecheck 0 errors; ESLint 0 errors (9 React-Co
 | ID | Status | Evidence | Notes |
 | --- | --- | --- | --- |
 | A01 | PASS | Image build; `compose.yaml` (db → migrate → app); demo loads (curl + Playwright). | Built from the working tree; re-verify from a clean clone after the owner commits. Cloud execution is A20. |
-| A02 | PASS | `tests/fixture-pipeline.test.ts` (3 roots per chat, 300 = 120/100/80, six-level branch, same-title Tips under different parents, mixed topic/discussion children); zero-count roots render outlined with "0 messages"; unknown counts render dashed "loading" (`MapView`). | No depth cap anywhere (DB, prompts, UI). |
+| A02 | PASS | `tests/fixture-pipeline.test.ts` (4 roots per chat, 300 = 120/100/80, six-level branch, same-title Tips under different parents, mixed topic/discussion children); zero-count roots render outlined with "0 messages"; unknown counts render dashed "loading" (`MapView`). | No depth cap anywhere (DB, prompts, UI). |
 | A03 | PASS | Native-shaped Baileys events → real normalizer: incoming/outgoing, Unicode/multiline, group/direct, system stub, attachments, history/live overlap, PN/LID learning, out-of-order edit/revoke, unsupported (location, poll, view-once), reactions/receipts ignored (`tests/unit.test.ts`, `tests/fixture-pipeline.test.ts`). | |
 | A04 | PASS | `validateTaxonomy` rejects unknown parents/refs, cycles, cross-root assignments, empty topics; DB trigger rejects self/ancestor cycles and cross-chat/root parents; stale revisions not placed (`tests/ai-failures.test.ts`, `tests/unit.test.ts`, `tests/graph-behaviour.test.ts`). | |
 | A05 | PASS | Deep file/source opened from Knowledge at depth 0 and Programming at depth 1 with full 7-element path, sender, time; unavailable/failed media states (service tests + Playwright). | |
@@ -44,13 +44,13 @@ Results observed on 25 Oct 2026: typecheck 0 errors; ESLint 0 errors (9 React-Co
 | A15 | PASS | Deletion unsubscribes first and blocks replay resurrection until reselection; revocation purges body, revisions, file access and claims; stale replay stays tombstoned; object keys derived from IDs; downloads use sanitized `filename*`, `nosniff`, sandbox CSP. | |
 | A16 | PASS | Zero model calls for navigation/depth/content/bulk preview (model_runs unchanged); ≤200 nodes with child paging and focus (unit); 200-node layout 0 overlaps (unit + perf); outline constant row heights and keyboard; reduced motion; live review update keeps drawer and camera (Playwright). | |
 | A17 | PASS | Tests, lint, typecheck, production build and image build pass; no placeholder P0 workflow. | |
-| A18 | **BLOCKED_EXTERNAL** | `reports/live-inference.json`: `NEBIUS_API_KEY` not configured. | Owner: provide key → `npm run models:discover` → set model env → `npm run live:inference`. |
+| A18 | **PASS** (26 Oct 2026) | `reports/live-inference.json` `a18_pipeline.status: PASS`: real Token Factory calls on fresh synthetic events. 9/9 jobs completed; Nano `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` 11/11 extract ok; Ultra `nvidia/Nemotron-3-Ultra-550b-a55b` taxonomy + refine (2 invalid outputs repaired by Super); Super `nvidia/nemotron-3-super-120b-a12b` 17/17 ok (extract escalation, repair, link verification: 2 verified / 3 rejected). Ultra path beyond two levels: Knowledge → Algorithms → Dynamic Programming → Longest Common Subsequence. | First run FAILED: Nano spent its whole output budget on its reasoning trace (finish_reason `length`). Fix: reasoning off for Nano and repairs (`NEBIUS_THINKING_OFF_ROLES`), 20-message extraction calls, uncovered messages escalate once to Super, truncated output detected. Live depth was 2–3 levels, not the fixture's 6 (the model decides depth from content). |
 | A19 | **BLOCKED_EXTERNAL** | `reports/live-connection.json`. Local image reached WhatsApp and produced an owner-only QR (not scanned). | Owner: scan QR on the **hosted** UI and send test messages (after A20 deploy). |
 | A20 | **BLOCKED_EXTERNAL** | `reports/cloud-deployment.json`; runbook and scripts prepared; local container-recreate rehearsal reconstructed identical counts/sizes. | Owner: Nebius project, CLI profile, registry, PostgreSQL, bucket, SecretStash, subnet, CPU preset, budget. |
 
 ## Exact completion scenario coverage
 
-Verified against persisted state (fixtures, local): 300 messages / 3 roots per chat; six-level branch persisted and reopened; lazy/deep access with zero model calls and ≤200 nodes; move/merge/cycle rejection; depth 0/1/2/6/All invariance; sizing formula cases 0…10,001; size-aware layout; combined filters; focused-revision Read and manual Missed; cross-chat links; twenty-message replay once; edit/revocation; container restart reconstruction (local only).
+Verified against persisted state (fixtures, local): 300 messages / 4 roots per chat; six-level branch persisted and reopened; lazy/deep access with zero model calls and ≤200 nodes; move/merge/cycle rejection; depth 0/1/2/6/All invariance; sizing formula cases 0…10,001; size-aware layout; combined filters; focused-revision Read and manual Missed; cross-chat links; twenty-message replay once; edit/revocation; container restart reconstruction (local only).
 
 Not yet verifiable (blocked): hosted QR pairing, live incoming/phone-sent messages, real Nemotron processing of fresh capture, Ultra-generated live path beyond two levels, laptop-off cloud capture, Endpoint stop/start.
 

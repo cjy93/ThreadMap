@@ -1,18 +1,19 @@
-// Frozen evaluation split for human review: 60 root examples (20 per root),
+// Frozen evaluation split for human review: up to 20 distinct root examples per root (74 total),
 // 20 cross-chat candidate pairs, 10 source/file finding tasks. Expectations are
 // developer-authored from the synthetic content; semantic scoring is human.
 import type { Manifest } from './generate';
 
-const ROOT = { K: 'KNOWLEDGE', G: 'GENERAL_CHAT', R: 'RESOURCES' } as const;
+const ROOT = { K: 'KNOWLEDGE', G: 'GENERAL_CHAT', E: 'EVENTS_ACTIVITIES', R: 'RESOURCES' } as const;
 
 export function buildEvaluation(m: Manifest) {
   const pathOf = (k: string) => k.slice(k.indexOf(':') + 1);
   const initial = m.messages.filter((x) => x.phase !== 'update');
-  const byRoot: Record<string, typeof initial> = { K: [], G: [], R: [] };
+  const byRoot: Record<string, typeof initial> = { K: [], G: [], E: [], R: [] };
   for (const x of initial) byRoot[pathOf(x.topic)[0]].push(x);
   // Deterministic spread: every n-th message per root.
-  const pick = (list: typeof initial, n: number) => Array.from({ length: n }, (_, i) => list[Math.floor((i * list.length) / n)]);
-  const rootExamples = (['K', 'G', 'R'] as const).flatMap((r) =>
+  // Distinct picks; a root with fewer than n messages contributes all of them.
+  const pick = (list: typeof initial, n: number) => [...new Set(Array.from({ length: Math.min(n, list.length) }, (_, i) => list[Math.floor((i * list.length) / Math.min(n, list.length))]))];
+  const rootExamples = (['K', 'G', 'E', 'R'] as const).flatMap((r) =>
     pick(byRoot[r], 20).map((x) => ({
       native_id: x.nativeId,
       chat: x.chat,

@@ -101,101 +101,113 @@
     }
   },
   "a18_pipeline": {
-    "generated_at": "2026-10-26T08:48:52.490Z",
+    "generated_at": "2026-10-26T09:29:06.140Z",
     "endpoint": "https://api.tokenfactory.nebius.com/v1/",
     "prompt_version": "tm-prompts-v1",
     "schema_version": "tm-schemas-v1",
     "evidence": "fresh synthetic normalized events (labeled fixture content), real Token Factory inference",
-    "duration_ms": 392514,
+    "duration_ms": 187851,
     "jobs": {
-      "failed": 3,
-      "completed": 3
+      "completed": 9
     },
     "roles": {
       "reasoning": {
         "model_ids": [
           "nvidia/Nemotron-3-Ultra-550b-a55b"
         ],
-        "calls": 1,
+        "calls": 3,
         "ok": 1,
-        "invalid_output": 0,
+        "invalid_output": 2,
         "errors": [],
         "fallback_used": false,
         "operations": [
-          "taxonomy"
+          "taxonomy",
+          "refine"
         ],
-        "input_tokens": 1547,
-        "output_tokens": 1887,
-        "p50_duration_ms": 4784,
-        "p95_duration_ms": 4784
+        "input_tokens": 10025,
+        "output_tokens": 9616,
+        "p50_duration_ms": 9775,
+        "p95_duration_ms": 11566
       },
       "fast": {
         "model_ids": [
           "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
         ],
-        "calls": 4,
-        "ok": 0,
-        "invalid_output": 4,
+        "calls": 11,
+        "ok": 11,
+        "invalid_output": 0,
         "errors": [],
         "fallback_used": false,
         "operations": [
           "extract"
         ],
-        "input_tokens": 15902,
-        "output_tokens": 16384,
-        "p50_duration_ms": 80676,
-        "p95_duration_ms": 82430
+        "input_tokens": 23100,
+        "output_tokens": 13334,
+        "p50_duration_ms": 8167,
+        "p95_duration_ms": 19676
       },
       "balanced": {
         "model_ids": [
           "nvidia/nemotron-3-super-120b-a12b"
         ],
-        "calls": 4,
-        "ok": 1,
-        "invalid_output": 3,
+        "calls": 17,
+        "ok": 17,
+        "invalid_output": 0,
         "errors": [],
         "fallback_used": false,
         "operations": [
-          "extract:repair"
+          "extract:escalate",
+          "taxonomy:repair",
+          "link"
         ],
-        "input_tokens": 16157,
-        "output_tokens": 15975,
-        "p50_duration_ms": 20022,
-        "p95_duration_ms": 21501
+        "input_tokens": 29594,
+        "output_tokens": 11411,
+        "p50_duration_ms": 2267,
+        "p95_duration_ms": 10121
       }
     },
     "taxonomy": {
       "builders": {
-        "model_topic_count": 0,
-        "observed_max_topic_depth": 0,
-        "deepest_model_path": [],
-        "model_placements": 0,
+        "model_topic_count": 17,
+        "observed_max_topic_depth": 2,
+        "deepest_model_path": [
+          "Knowledge",
+          "Authentication",
+          "Token Strategy"
+        ],
+        "model_placements": 121,
         "frontiers": {},
         "ultra_path_beyond_two_levels": false
       },
       "study": {
-        "model_topic_count": 5,
-        "observed_max_topic_depth": 1,
+        "model_topic_count": 32,
+        "observed_max_topic_depth": 3,
         "deepest_model_path": [
-          "General Chat",
-          "Scheduling"
+          "Knowledge",
+          "Algorithms",
+          "Dynamic Programming",
+          "Longest Common Subsequence"
         ],
-        "model_placements": 40,
-        "frontiers": {},
-        "ultra_path_beyond_two_levels": false
+        "model_placements": 102,
+        "frontiers": {
+          "completed": 1
+        },
+        "ultra_path_beyond_two_levels": true
       }
     },
     "cross_chat_links": {
-      "verified": 0,
-      "rejected": 0,
-      "verifier_models": []
+      "verified": 2,
+      "rejected": 3,
+      "verifier_models": [
+        "nvidia/nemotron-3-super-120b-a12b"
+      ]
     },
     "budget": {
-      "calls_used": 9,
+      "calls_used": 31,
       "usd_used_estimate": 0,
       "price_table_configured": false
     },
-    "status": "FAIL",
+    "status": "PASS",
     "workspace_note": "isolated synthetic workspace; delete with the cleanup flag after review"
   }
 }

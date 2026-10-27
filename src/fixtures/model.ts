@@ -6,8 +6,8 @@
 import type { CompletionRequest, CompletionResult, ModelProvider, Role } from '../server/ai/provider';
 import type { Manifest, ManifestMessage } from './generate';
 
-const ROOT_OF_LETTER: Record<string, string> = { K: 'KNOWLEDGE', G: 'GENERAL_CHAT', R: 'RESOURCES' };
-const LETTER_OF_TITLE: Record<string, string> = { Knowledge: 'K', 'General Chat': 'G', Resources: 'R' };
+const ROOT_OF_LETTER: Record<string, string> = { K: 'KNOWLEDGE', G: 'GENERAL_CHAT', E: 'EVENTS_ACTIVITIES', R: 'RESOURCES' };
+const LETTER_OF_TITLE: Record<string, string> = { Knowledge: 'K', 'General Chat': 'G', 'Events and Activities': 'E', Resources: 'R' };
 const LEVELS_PER_CALL = 2;
 
 const pathOfKey = (key: string) => key.slice(key.indexOf(':') + 1);
@@ -36,6 +36,13 @@ export class FixtureModelProvider implements ModelProvider {
     else if (op === 'refine') out = this.taxonomy(input, req, String(input.branch ?? ''));
     else if (op === 'assign') out = this.assign(input, req);
     else if (op === 'link') out = this.link(req);
+    else if (op === 'describe') out = { description: 'A shared photo (fixture description).' };
+    else if (op === 'ask') out = this.ask(input);
+    // The fixture taxonomy is already grouped as intended.
+    else if (op === 'regroup') out = { groups: [] };
+    else if (op === 'split') out = { parts: [] };
+    // Development stand-in: cites the first matching message, says nothing it cannot support.
+    else if (op === 'answer') out = { answer: 'Fixture answer (development mode, not live inference).', points: (input.messages as { ref: string }[]).slice(0, 1).map((m) => ({ text: 'First matching message', refs: [m.ref] })), enough: false };
     else out = { ok: true, role: req.role, echo: 'threadmap-capability-check' };
     const text = JSON.stringify(out);
     return { text, modelId: this.modelIdFor(req.role), fallback: false, usage: { input: Math.ceil(req.user.length / 4), output: Math.ceil(text.length / 4), reasoning: null } };
@@ -167,6 +174,14 @@ export class FixtureModelProvider implements ModelProvider {
       }
     }
     return { assignments, secondary_placements: secondary };
+  }
+
+  /** Deterministic stand-in: the request's words, plus topics whose titles share one. */
+  private ask(input: Record<string, unknown>) {
+    const words = String(input.request ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2);
+    const topics = (input.topics as { id: string; path: string }[]) ?? [];
+    const topic_keys = topics.filter((t) => words.some((w) => t.path.toLowerCase().includes(w))).map((t) => t.id).slice(0, 10);
+    return { interpretation: `Messages about ${words.join(' ')}`, terms: words.slice(0, 16), topic_keys };
   }
 
   private link(req: CompletionRequest) {

@@ -68,3 +68,15 @@ export class SafeError extends Error {
     super(message);
   }
 }
+
+/** Content type from magic bytes (never trust the declared type of received files). */
+export function sniffMime(b: Buffer): string | null {
+  if (b.subarray(0, 4).toString('latin1') === '%PDF') return 'application/pdf';
+  if (b[0] === 0x89 && b.subarray(1, 4).toString('latin1') === 'PNG') return 'image/png';
+  if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
+  if (b.subarray(0, 4).toString('latin1') === 'GIF8') return 'image/gif';
+  if (b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (b.subarray(0, 4).toString('latin1') === 'OggS') return 'audio/ogg';
+  if (b.subarray(4, 8).toString('latin1') === 'ftyp') return 'video/mp4';
+  return null;
+}

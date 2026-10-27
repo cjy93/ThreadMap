@@ -12,6 +12,8 @@ export interface NormalizedAttachment {
   viewOnce: boolean;
   /** Serialized native download material; encrypted before storage. */
   mediaRef: string | null;
+  /** Small JPEG preview WhatsApp embeds in image/video messages (base64). */
+  thumbnailB64?: string | null;
   /** Fixture-only bytes (base64) standing in for a successful media fetch. */
   fixtureBytesB64?: string;
   /** Fixture-only availability override (e.g. expired media). */
@@ -40,6 +42,8 @@ export interface MessageEvent {
   ephemeralSec: number | null;
   /** Content-free description for system/unsupported markers. */
   marker: string | null;
+  /** Starred in WhatsApp when the message was synced (history carries the flag). */
+  starred?: boolean;
 }
 
 export interface EditEvent {
@@ -61,6 +65,15 @@ export interface RevokeEvent {
   timeSec: number | null;
 }
 
+/** The owner starred or unstarred a message in WhatsApp (synced from the phone). */
+export interface StarEvent {
+  type: 'star';
+  chatJid: string;
+  targetNativeId: string;
+  fromMe: boolean;
+  starred: boolean;
+}
+
 export interface AliasEvent {
   type: 'alias';
   pn: string;
@@ -73,6 +86,17 @@ export interface ChatMetaEvent {
   chatJidAlt?: string | null;
   kind: 'group' | 'direct';
   title: string | null;
+  /** WhatsApp's last-activity time for the chat (seconds), used to list chats like WhatsApp does. */
+  lastActivitySec?: number | null;
+}
+
+/** A person's display names: the one saved in the owner's address book, and the one they chose. */
+export interface ContactEvent {
+  type: 'contact';
+  jid: string;
+  altJid: string | null;
+  name: string | null;
+  pushName: string | null;
 }
 
 /** Receipts, presence, reactions and other non-content updates. */
@@ -81,4 +105,4 @@ export interface IgnoredEvent {
   reason: string;
 }
 
-export type NormalizedEvent = MessageEvent | EditEvent | RevokeEvent | AliasEvent | ChatMetaEvent | IgnoredEvent;
+export type NormalizedEvent = MessageEvent | EditEvent | RevokeEvent | StarEvent | AliasEvent | ChatMetaEvent | ContactEvent | IgnoredEvent;

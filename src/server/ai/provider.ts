@@ -4,7 +4,8 @@
 import OpenAI from 'openai';
 import type { LlmConfig } from '../../lib/config';
 
-export type Role = 'reasoning' | 'fast' | 'balanced';
+// vision: an image-understanding model that describes images / video frames for categorisation.
+export type Role = 'reasoning' | 'fast' | 'balanced' | 'vision';
 
 export interface FixtureHints {
   refs?: Record<string, string>; // local ref -> native message id
@@ -24,6 +25,8 @@ export interface CompletionRequest {
   fixtureHints?: FixtureHints;
   /** false disables the model's reasoning trace; undefined uses the role default. */
   thinking?: boolean;
+  /** Images sent with the user turn (vision role). */
+  images?: { mime: string; b64: string }[];
 }
 
 export interface CompletionResult {
@@ -38,7 +41,7 @@ export interface CompletionResult {
 export class ProviderError extends Error {
   constructor(
     message: string,
-    readonly kind: 'rate_limit' | 'timeout' | 'unavailable' | 'auth' | 'bad_request' | 'not_configured',
+    readonly kind: 'rate_limit' | 'overloaded' | 'timeout' | 'unavailable' | 'auth' | 'bad_request' | 'not_configured',
     readonly retryable: boolean,
   ) {
     super(message);
@@ -98,7 +101,14 @@ export class NebiusModelProvider implements ModelProvider {
   }
 
   modelIdFor(role: Role): string {
-    const id = role === 'reasoning' ? this.cfg.NEBIUS_MODEL_REASONING : role === 'fast' ? this.cfg.NEBIUS_MODEL_FAST : this.cfg.NEBIUS_MODEL_BALANCED;
+    const id =
+      role === 'reasoning'
+        ? this.cfg.NEBIUS_MODEL_REASONING
+        : role === 'fast'
+          ? this.cfg.NEBIUS_MODEL_FAST
+          : role === 'vision'
+            ? this.cfg.NEBIUS_MODEL_VISION
+            : this.cfg.NEBIUS_MODEL_BALANCED;
     if (!id) throw new ProviderError(`model for role ${role} is not configured`, 'not_configured', false);
     return id;
   }
@@ -139,7 +149,12 @@ export class NebiusModelProvider implements ModelProvider {
         response_format: responseFormat,
         messages: [
           { role: 'system', content: req.system },
-          { role: 'user', content: req.user },
+          req.images?.length
+            ? {
+                role: 'user',
+                content: [{ type: 'text', text: req.user }, ...req.images.map((i) => ({ type: 'image_url' as const, image_url: { url: `data:${i.mime};base64,${i.b64}` } }))],
+              }
+            : { role: 'user', content: req.user },
         ],
         // Nemotron chat-template switch; Token Factory honours it (reasoning output drops to 0).
         ...(thinkingOff ? { chat_template_kwargs: { enable_thinking: false } } : {}),
@@ -171,6 +186,8 @@ export function mapOpenAiError(e: unknown): ProviderError {
   if (status === 401 || status === 403) return new ProviderError('provider authentication failed', 'auth', false);
   if (status === 404) return new ProviderError('model not found or not enabled', 'unavailable', false);
   if (status === 400 || status === 422) return new ProviderError('provider rejected the request', 'bad_request', false);
+  // Busy rather than broken: worth waiting out.
+  if (status === 503 || status === 529) return new ProviderError(`provider overloaded (${status})`, 'overloaded', true);
   if (status && status >= 500) return new ProviderError(`provider error ${status}`, 'unavailable', true);
   if (/timeout/i.test(name) || /timeout/i.test(String((e as Error).message))) return new ProviderError('provider timeout', 'timeout', true);
   return new ProviderError('provider connection failed', 'unavailable', true);

@@ -1,17 +1,20 @@
 // Analysis worker: durable pg-boss queue over analysis_jobs rows. Never a
 // request-owned promise; restarts resume pending jobs from PostgreSQL.
 import { PgBoss } from 'pg-boss';
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import * as s from '../db/schema';
 import { loadLlmConfig } from '../lib/config';
 import { FixtureModelProvider } from '../fixtures/model';
 import { loadFixtureBundle } from '../fixtures/source';
-import { dispatchOutbox, maybeScheduleInitialTaxonomy, runJob, type PipelineDeps } from '../server/ai/pipeline';
+import { dispatchOutbox, maybeScheduleInitialTaxonomy, resumeStrandedBuilds, runJob, type PipelineDeps } from '../server/ai/pipeline';
 import { NebiusModelProvider, type ModelProvider, type Role } from '../server/ai/provider';
 import { getDb, pgSslOptions } from '../server/db';
 import { purgeExpiredDemos } from '../server/demo';
 import { sweepExpired } from '../server/ingest/ingest';
 import { getStorage } from '../server/storage';
+import { answerQuestion, interpretRequest } from '../server/api/ask';
+import { ASK_CHANNEL, ASK_REPLY_CHANNEL } from '../server/notify';
+import pg from 'pg';
 
 const QUEUE = 'tm-analysis';
 const log = (msg: string, meta: Record<string, string | number | boolean | null> = {}) => console.log(JSON.stringify({ at: new Date().toISOString(), proc: 'worker', msg, ...meta }));
@@ -37,6 +40,28 @@ async function main() {
   await boss.start();
   await boss.createQueue(QUEUE, { retryLimit: 2, retryBackoff: true, retryDelay: 10 }).catch(() => undefined);
   const deps = provider ? ({ db, provider, cfg } satisfies PipelineDeps) : null;
+
+  // Ask: the web process sends questions here because only this process holds the model key.
+  if (deps) {
+    const listener = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: pgSslOptions(), application_name: 'threadmap-worker-ask' });
+    await listener.connect();
+    await listener.query(`LISTEN ${ASK_CHANNEL}`);
+    listener.on('notification', (n) => {
+      void (async () => {
+        let id = '';
+        try {
+          const req = JSON.parse(n.payload ?? '{}') as { id: string; kind?: 'answer'; workspaceId: string; chatIds: string[]; question: string; messageIds?: string[] };
+          id = req.id;
+          const r = req.kind === 'answer' ? await answerQuestion(deps, req.workspaceId, req.chatIds, req.question, req.messageIds ?? []) : await interpretRequest(deps, req.workspaceId, req.chatIds, req.question);
+          await db.execute(sql`SELECT pg_notify(${ASK_REPLY_CHANNEL}, ${JSON.stringify({ id, ok: true, ...r })})`);
+        } catch (e) {
+          // The reason (e.g. "prompt too large", "provider overloaded") carries no chat content.
+          log('ask_failed', { error: e instanceof Error ? `${e.name}: ${e.message.slice(0, 120)}` : 'unknown' });
+          if (id) await db.execute(sql`SELECT pg_notify(${ASK_REPLY_CHANNEL}, ${JSON.stringify({ id, ok: false })})`).catch(() => undefined);
+        }
+      })();
+    });
+  }
 
   const enqueue = async (ids: string[]) => {
     for (const id of ids) await boss.send(QUEUE, { jobId: id }, { singletonKey: id });
@@ -73,14 +98,18 @@ async function main() {
         JOIN workspaces w ON w.id = c.workspace_id
         WHERE u.assigned_topic_id IS NULL AND c.taxonomy_version = 0 AND c.selected AND w.mode = 'private'`);
       for (const r of waiting.rows) await maybeScheduleInitialTaxonomy(db, r.chat_id);
-      // Durable recovery: every pending private job is (re)submitted idempotently.
-      const pending = await db
-        .select({ id: s.analysisJobs.id })
-        .from(s.analysisJobs)
-        .innerJoin(s.workspaces, eq(s.workspaces.id, s.analysisJobs.workspaceId))
-        .where(and(inArray(s.analysisJobs.status, ['pending']), eq(s.workspaces.mode, 'private')))
-        .limit(200);
-      await enqueue(pending.map((p) => p.id));
+      // A map build that failed partway resumes on its own (picked up below as a pending job).
+      const resumed = await resumeStrandedBuilds(db);
+      if (resumed.length) log('builds_resumed', { count: resumed.length });
+      // Durable recovery: a pending private job with no live queue entry is (re)submitted.
+      // singletonKey does not de-duplicate on a standard pg-boss queue, so resubmitting every
+      // pending job each tick piled up thousands of copies and starved new jobs behind them.
+      const pending = await db.execute<{ id: string }>(sql`
+        SELECT a.id FROM analysis_jobs a JOIN workspaces w ON w.id = a.workspace_id
+        WHERE a.status = 'pending' AND w.mode = 'private'
+          AND NOT EXISTS (SELECT 1 FROM pgboss.job j WHERE j.name = ${QUEUE} AND j.state IN ('created', 'retry', 'active') AND j.data->>'jobId' = a.id::text)
+        LIMIT 200`);
+      await enqueue(pending.rows.map((p) => p.id));
       // Jobs left 'running' by a crashed worker are reset to pending after 10 minutes.
       await db.execute(sql`UPDATE analysis_jobs SET status = 'pending' WHERE status = 'running' AND started_at < now() - interval '10 minutes'`);
     } catch (e) {

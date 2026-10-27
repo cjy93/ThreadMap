@@ -1,6 +1,6 @@
 # ThreadMap
 
-ThreadMap turns busy WhatsApp conversations into navigable knowledge maps. Every selected chat gets three permanent roots — **Knowledge**, **General Chat** and **Resources** — with a recursive, evidence-backed topic hierarchy proposed by NVIDIA Nemotron (via Nebius Token Factory). Node size shows how many matching messages a branch holds (including every hidden descendant), and any root or topic opens the exact source messages and files beneath it, at any depth, without expanding the tree first.
+ThreadMap turns busy WhatsApp conversations into navigable knowledge maps. Every selected chat gets four permanent roots — **Knowledge**, **General Chat**, **Events and Activities** and **Resources** — with a recursive, evidence-backed topic hierarchy proposed by NVIDIA Nemotron (via Nebius Token Factory). Node size shows how many matching messages a branch holds (including every hidden descendant), and any root or topic opens the exact source messages and files beneath it, at any depth, without expanding the tree first.
 
 > **Status (25 Oct 2026):** implementation, deterministic tests and local production-image runs are complete. The live gates — real Nemotron inference (A18), real WhatsApp pairing (A19) and the Nebius Endpoint deployment (A20) — are **BLOCKED_EXTERNAL** until the owner supplies credentials. See [`reports/acceptance.md`](reports/acceptance.md). Nothing in this repository claims a cloud deployment or live run that has not happened.
 
@@ -13,14 +13,14 @@ Built for the Nebius × NVIDIA Global AI Hackathon (Best Apps and Agents). Speci
                      (linked device)      │ PostgreSQL │
                                           ├────────────┤
  Nebius Token Factory ◄── pg-boss worker ─┘ (sources,  └─► Object Storage (cached files)
- (Nemotron Ultra/Nano/Super)               graph, review,
+ (Nemotron Nano/Super)                     graph, review,
                                            queue, encrypted auth)
 ```
 
 One container image, supervised as **three separate Node processes** (`dist/supervisor.js`): the web server (only exposed port, 3000), the WhatsApp companion and the analysis worker. All durable state is external: PostgreSQL (sources, recursive topics, placements, review state, depth preferences, refinement frontiers, queue, encrypted Baileys credentials + Signal keys, trusted origin) and S3-compatible Object Storage (cached attachments).
 
 - **Capture:** incoming *and* owner-sent messages from selected chats only; native-key deduplication; revisions, edits, revocations with tombstones; out-of-order controls; PN/LID alias learning; bounded memory-only pre-selection buffer; new-only cutoff; history cap that never caps live capture. Sources commit with an analysis outbox *before* any model call.
-- **Analysis:** Nano extracts discussion units; Ultra proposes a flat-node recursive taxonomy in bounded pieces and leaves a **refinement frontier** that continues under the *same* logical budget ledger; Super repairs invalid output, resolves ambiguous assignments and verifies cross-chat links. All output is validated in code (IDs, scope, roots, cycles, empty topics, evidence revisions) and published atomically.
+- **Analysis:** Nano extracts discussion units; Super builds a flat-node recursive taxonomy in windows of up to 40 discussions and leaves a **refinement frontier** that continues under the *same* logical budget ledger; Super repairs invalid output, resolves ambiguous assignments and verifies cross-chat links. All output is validated in code (IDs, scope, roots, cycles, empty topics, evidence revisions) and published atomically.
 - **Navigation:** Show depth 0/1/2/3/custom/All is display-only; counts, logical sizes, content and bulk scopes are identical at every depth. Node diameter `D(n) = sqrt(64² + (220² − 64²) · clamp(ln(1+n)/ln(1+10000), 0, 1))` from server-derived distinct matching counts. ≤200 visible nodes, lazy child paging and branch focus; stored depth is never truncated.
 - **Review:** per-user, revision-aware Read/Missed; two-second foreground dwell marks only the focused revision; bulk actions freeze `(message, revision)` pairs; independent of WhatsApp receipts. ThreadMap never sends messages or read receipts.
 
@@ -44,11 +44,10 @@ Run the full image locally (development only — this cannot satisfy the cloud g
 npm run secrets:generate > .env.compose          # then append the dev settings from .env.development.local.example
 docker compose -p tmlocal up -d                  # db + migrate + app (3 supervised processes)
 docker compose -p tmlocal exec app node dist/cli/bootstrap-origin.js <DEPLOYMENT_ID> http://localhost:3000
-docker compose -p tmlocal exec -e OWNER_EMAIL=you@example.com -e OWNER_PASSWORD='12+ chars' app node dist/cli/create-owner.js
 E2E_BASE_URL=http://localhost:3000 npm run test:e2e
 ```
 
-Open http://localhost:3000 → **Try the demo** (isolated synthetic replay, pairing disabled) or sign in as the owner → **Connect WhatsApp**.
+Open http://localhost:3000 → **Try the demo** (isolated synthetic replay, pairing disabled) or **Connect WhatsApp** and scan the QR. There are no passwords: the WhatsApp account you scan with becomes your ThreadMap account. Every scan starts from scratch: the earlier account for that number (chats, messages, maps, photos) is deleted and a new, empty one is created. Reconnecting from a saved session (for example after a restart) keeps everything.
 
 ### Rebuild and restart after code changes
 
@@ -69,7 +68,7 @@ Other everyday commands:
 | --- | --- |
 | `docker compose -p tmlocal restart app` | Restart the app on the **same** image (does not pick up code changes). |
 | `docker compose -p tmlocal stop` / `start` | Pause and resume the whole stack; data is kept. |
-| `docker compose -p tmlocal down` | Remove the containers. **This loses the local database** (the `db` service has no named volume), so you must repeat `bootstrap-origin` and `create-owner` and pair WhatsApp again. |
+| `docker compose -p tmlocal down` | Remove the containers. **This loses the local database** (the `db` service has no named volume), so you must repeat `bootstrap-origin` and scan WhatsApp again. |
 
 On Windows, if Docker is installed only inside WSL, run these commands from a WSL shell in the repo folder (for example `cd "/mnt/c/Users/<you>/.../ThreadMap"`), or prefix each one with `wsl -e bash -lc '…'`. Inside WSL, use `docker build -t threadmap:local .` instead of `npm run image:build`: WSL may pick up the Windows `npm`, which cannot see WSL's Docker.
 
@@ -79,7 +78,6 @@ On Windows, if Docker is installed only inside WSL, run these commands from a WS
 | --- | --- |
 | `npm run db:migrate` | Apply Drizzle migrations under an advisory lock (`MIGRATION_DATABASE_URL`). |
 | `npm run fixtures:generate` | Regenerate the deterministic native-event fixtures + manifest + evaluation split (`fixtures/v1`). |
-| `npm run owner:create` | Provision the owner account (public sign-up is disabled). |
 | `npm run secrets:generate` | Generate `BETTER_AUTH_SECRET`, `WHATSAPP_AUTH_ENCRYPTION_KEY`, `DEPLOYMENT_ID` once, for SecretStash. |
 | `npm run origin:bootstrap` | In-network admin: write the observed HTTPS origin into `runtime_settings`. |
 | `npm run models:discover` | Discover exact Nemotron IDs from `GET /v1/models` and capability-test each role (A18 prep). |

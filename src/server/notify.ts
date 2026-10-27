@@ -3,6 +3,9 @@ import type { DbOrTx } from './db';
 
 export const EVENTS_CHANNEL = 'tm_events';
 export const QR_CHANNEL = 'tm_qr';
+// Ask: the web process hands a question to the worker (which alone holds the model key) and awaits the reply.
+export const ASK_CHANNEL = 'tm_ask';
+export const ASK_REPLY_CHANNEL = 'tm_ask_reply';
 
 /** Content-free change notifications delivered (on commit) to SSE subscribers. */
 export interface ChangeEvent {

@@ -1,7 +1,8 @@
 import { getDb } from '@/server/db';
-import { authed } from '@/server/http';
+import { authed, readJson } from '@/server/http';
 import { startPairing } from '@/server/api/connector';
 
 export const dynamic = 'force-dynamic';
 
-export const POST = authed(async (ctx) => startPairing(getDb(), ctx));
+// Body (optional): { phone } to link by a code typed on the phone instead of scanning a QR.
+export const POST = authed(async (ctx, req) => startPairing(getDb(), ctx, await readJson(req)));

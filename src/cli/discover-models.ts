@@ -11,6 +11,7 @@ const PREFERRED: Record<Role, RegExp> = {
   reasoning: /nemotron-3-ultra/i,
   fast: /nemotron-3-nano/i,
   balanced: /nemotron-3-super/i,
+  vision: /nemotron.*-vl/i,
 };
 
 async function main() {
@@ -55,7 +56,7 @@ async function main() {
         const ex = await p.complete({
           role,
           operation: 'capability-extract',
-          system: 'Segment the messages into discussion units. Return {"units":[{"unit_key","primary_root","discussion_title","topic_terms","message_refs","summary_bullets":[{"text","evidence_refs"}],"resource_refs","needs_review"}]}. primary_root is KNOWLEDGE, GENERAL_CHAT or RESOURCES. JSON only.',
+          system: 'Segment the messages into discussion units. Return {"units":[{"unit_key","primary_root","discussion_title","topic_terms","message_refs","summary_bullets":[{"text","evidence_refs"}],"resource_refs","needs_review"}]}. primary_root is KNOWLEDGE, GENERAL_CHAT, EVENTS_ACTIVITIES or RESOURCES. JSON only.',
           user: JSON.stringify({ messages: [{ ref: 'm1', sender: 'A', text: 'Rotate refresh tokens on every use.' }, { ref: 'm2', sender: 'B', text: 'Meet at 7pm?' }] }),
           maxOutputTokens: 2048,
           schemaName: 'extraction',

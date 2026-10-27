@@ -6,6 +6,50 @@ import type { ContentFile, ContentMessage, ContentResponse, PathItem, SourceMess
 const pathText = (p: PathItem[]) => p.map((x) => x.title).join(' › ');
 const time = (s: string | null, tz: string) => (s ? new Date(s).toLocaleString('en-SG', { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }) : 'Unknown time');
 
+interface MediaItem {
+  id: string;
+  media_type: string;
+  availability: string;
+  has_preview: boolean;
+  description: string | null;
+}
+
+/**
+ * Shows an attachment the way WhatsApp would: images inline, videos and voice
+ * clips as players (loaded on request), with the vision model's reading below.
+ */
+function MediaView({ a, onFetch }: { a: MediaItem; onFetch: (id: string) => void }) {
+  const src = `/api/attachments/${a.id}/content`;
+  const preview = a.has_preview ? `/api/attachments/${a.id}/preview` : undefined;
+  const cached = a.availability === 'cached';
+  const loadable = a.availability === 'available' || a.availability === 'failed';
+  const load = (label: string) => (loadable ? <button onClick={() => onFetch(a.id)}>{label}</button> : a.availability === 'fetching' ? <span className="counts">Loading…</span> : null);
+  let view: React.ReactNode = null;
+  if (a.media_type === 'image' || a.media_type === 'sticker') {
+    const cls = a.media_type === 'sticker' ? 'media sticker' : 'media';
+    // eslint-disable-next-line @next/next/no-img-element
+    view = cached ? <img className={cls} src={src} alt={a.description ?? (a.media_type === 'sticker' ? 'Sticker' : 'Shared image')} loading="lazy" /> : preview ? <img className={`${cls} preview`} src={preview} alt="Image preview" /> : null;
+    if (!cached) view = <>{view}{load(a.media_type === 'sticker' ? 'Load sticker' : 'Load full image')}</>;
+  } else if (a.media_type === 'video') {
+    view = cached ? <video className="media" src={src} poster={preview} controls preload="metadata" /> : (
+      <>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {preview ? <img className="media preview" src={preview} alt="Video preview" /> : null}
+        {load('▶ Load video')}
+      </>
+    );
+  } else if (a.media_type === 'audio') {
+    view = cached ? <audio src={src} controls preload="none" /> : load('▶ Load voice clip');
+  }
+  if (!view) return null;
+  return (
+    <div className="media-wrap">
+      {view}
+      {a.description ? <div className="counts">Nemotron VL: {a.description}</div> : null}
+    </div>
+  );
+}
+
 interface RelatedItem {
   link_id: string;
   relation_type: string;
@@ -78,9 +122,10 @@ export function SourceView({ messageId, tz, dwellMs, autoRead, suppressed, onSup
         <strong>{m.sender}</strong> · {m.direction === 'outgoing' ? 'sent by you' : 'received'} · {time(m.sent_at, tz)} <span className="counts">({tz})</span>
         {m.edited_at ? <span className="pill" style={{ marginLeft: 6 }}>edited · revision {m.content_revision}</span> : null}
       </p>
-      {m.marker ? <p className="pill">{m.marker}</p> : <div className="src">{m.body}</div>}
+      {m.marker ? <p className="pill">{m.marker}</p> : m.body ? <div className="src">{m.body}</div> : null}
       {m.attachments.map((a) => (
         <div key={a.id} className="msg">
+          <MediaView a={a} onFetch={fetchFile} />
           📎 {a.filename ?? a.media_type} <span className="counts">{a.mime ?? ''} {a.size ? `· ${(a.size / 1024).toFixed(1)} KiB` : ''} · {fileState[a.id] ?? a.availability}</span>
           <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
             {a.availability === 'cached' ? (
@@ -105,14 +150,26 @@ export function SourceView({ messageId, tz, dwellMs, autoRead, suppressed, onSup
           {m.review === 'missed' && autoRead && !suppressed ? <span className="counts"> · marks Read after 2 s in view</span> : null}
         </p>
       ) : null}
-      {m.context.length ? (
-        <section aria-label="Neighbouring context">
-          <h4 style={{ marginBottom: 4 }}>Context outside current filter</h4>
-          {m.context.map((c) => (
-            <button key={c.message_id} className="ctx" style={{ display: 'block', textAlign: 'left', border: 'none', background: 'none', width: '100%' }} onClick={() => onOpenMessage(m.chat.id, c.message_id)}>
-              <strong>{c.sender}</strong> {time(c.sent_at, tz)}: {c.snippet ?? '(removed)'}
-            </button>
-          ))}
+      {m.context.length > 1 ? (
+        <section aria-label="Conversation around this message" className="thread">
+          <h4 style={{ marginBottom: 4 }}>In the conversation</h4>
+          {m.context.map((c) =>
+            c.current ? (
+              <div key={c.message_id} className={`tmsg current ${c.direction === 'outgoing' ? 'mine' : ''}`} aria-current="true">
+                <div className="meta">
+                  <strong>{c.sender}</strong> · {time(c.sent_at, tz)} · this message
+                </div>
+                {c.snippet ?? '(removed)'}
+              </div>
+            ) : (
+              <button key={c.message_id} className={`tmsg ${c.direction === 'outgoing' ? 'mine' : ''}`} onClick={() => onOpenMessage(m.chat.id, c.message_id)}>
+                <div className="meta">
+                  <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
+                </div>
+                {c.snippet ?? '(removed)'}
+              </button>
+            ),
+          )}
         </section>
       ) : null}
       <p className="counts">
@@ -159,6 +216,20 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
   }, [load, refreshKey]);
   useEffect(() => setBulk(null), [nodeId, fp]);
 
+  const markRead = async (it: ContentMessage) => {
+    setItems((cur) => cur.map((x) => ('message_id' in x && x.message_id === it.message_id && !('attachment_id' in x) ? { ...x, review: 'read' as const } : x)));
+    try {
+      await api('/api/review', { method: 'POST', json: { message_id: it.message_id, status: 'read', revision: it.content_revision, source: 'manual' } });
+    } catch (e) {
+      setNote((e as Error).message);
+      void load();
+    }
+    onChanged();
+  };
+  const fetchFile = async (id: string) => {
+    await api(`/api/attachments/${id}/fetch`, { method: 'POST' }).catch(() => undefined);
+    void load();
+  };
   const preview = async () => {
     const r = await api<{ snapshotId: string; count: number }>(`/api/chats/${chatId}/bulk-preview`, { method: 'POST', json: { node_id: nodeId, filter: filterParams(filter) } });
     setBulk({ id: r.snapshotId, count: r.count });
@@ -205,27 +276,37 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
       </div>
       <div className="dbody">
         {data?.summary.available && tab === 'messages' ? (
-          <section aria-label="Grounded summary">
+          // A closed drop-down: the messages start right below it, and once open its points scroll inside it.
+          <details className="summary-drop" aria-label="Grounded summary">
+            <summary>
+              Summary by Nemotron{data.summary.claims.length ? ` · ${data.summary.claims.length} point${data.summary.claims.length === 1 ? '' : 's'}` : ''}
+            </summary>
             {data.summary.coverage === 'hidden_for_filtered_view' ? (
               <p className="counts">
                 {data.summary.note} <button onClick={() => setFullSummary(true)}>View full-topic summary</button>
               </p>
             ) : (
               <ul>
+                {data.summary.claims.length ? <li className="counts cite-note">[1], [2]… are its sources: hover to preview the message, click to open it.</li> : null}
                 {data.summary.claims.map((c) => (
                   <li key={c.id}>
                     {c.text}{' '}
-                    {c.evidence.map((e, i) => (
-                      <button key={e.m} style={{ fontSize: 11, padding: '0 4px' }} onClick={() => onOpenMessage(chatId, e.m)} aria-label="Open cited source">
-                        [{i + 1}]
-                      </button>
-                    ))}
+                    {c.evidence.map((e, i) => {
+                      // The cited message, when it is in the list already loaded below.
+                      const src = items.find((x): x is ContentMessage => !('attachment_id' in x) && x.message_id === e.m);
+                      const tip = src ? `Source ${i + 1} — ${src.sender}: “${(src.snippet ?? '').slice(0, 160)}”. Click to open.` : `Source ${i + 1}: the message this point is based on. Click to open it.`;
+                      return (
+                        <button key={e.m} className="cite" title={tip} onClick={() => onOpenMessage(chatId, e.m)} aria-label={tip}>
+                          [{i + 1}]
+                        </button>
+                      );
+                    })}
                   </li>
                 ))}
                 {fullSummary ? <li className="counts">Full-topic summary (all dates and review states)</li> : null}
               </ul>
             )}
-          </section>
+          </details>
         ) : null}
         {tab === 'related' ? (
           related === null ? (
@@ -275,6 +356,7 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
           items.map((it) =>
             'attachment_id' in it ? (
               <div key={it.attachment_id} className="msg">
+                <MediaView a={{ ...it, id: it.attachment_id }} onFetch={fetchFile} />
                 📎 <strong>{it.filename ?? it.media_type}</strong> <span className="counts">{it.availability}</span>
                 <div className="path">{it.topic_paths.map(pathText).join(' | ')}</div>
                 <button onClick={() => onOpenMessage(chatId, it.message_id)}>Open source message</button>{' '}
@@ -285,16 +367,24 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
                 ) : null}
               </div>
             ) : (
-              <button key={it.message_id} className="msg" onClick={() => onOpenMessage(chatId, it.message_id)}>
-                <div>
-                  <strong>{it.sender}</strong> <span className="counts">{it.sent_at ? new Date(it.sent_at).toLocaleString('en-SG', { timeZone: filter.tz }) : 'Unknown time'}</span>{' '}
-                  <span className={it.review === 'missed' ? 'missed' : 'readbadge'}>{it.review === 'missed' ? '● Missed' : '✓ Read'}</span>
-                  {it.edited ? <span className="pill">edited</span> : null}
-                  {it.attachment_count ? <span className="pill">📎 {it.attachment_count}</span> : null}
-                </div>
-                <div>{it.snippet ?? '(no text)'}</div>
-                <div className="path">{it.topic_paths.map(pathText).join(' | ')}</div>
-              </button>
+              <div key={it.message_id} className="msg msg-row">
+                <button className="msg-open" onClick={() => onOpenMessage(chatId, it.message_id)}>
+                  <div>
+                    <strong>{it.sender}</strong> <span className="counts">{it.sent_at ? new Date(it.sent_at).toLocaleString('en-SG', { timeZone: filter.tz }) : 'Unknown time'}</span>{' '}
+                    <span className={it.review === 'missed' ? 'missed' : 'readbadge'}>{it.review === 'missed' ? '● Missed' : '✓ Read'}</span>
+                    {it.edited ? <span className="pill">edited</span> : null}
+                    {it.attachment_count ? <span className="pill">📎 {it.attachment_count}</span> : null}
+                  </div>
+                  <div>{it.snippet ?? '(no text)'}</div>
+                  <div className="path">{it.topic_paths.map(pathText).join(' | ')}</div>
+                </button>
+                {/* Mark read straight from the list, without opening the message. */}
+                {it.review === 'missed' ? (
+                  <button className="mark-read" aria-label={`Mark message from ${it.sender} as read`} onClick={() => void markRead(it)}>
+                    ✓ Read
+                  </button>
+                ) : null}
+              </div>
             ),
           )
         )}

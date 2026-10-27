@@ -20,7 +20,7 @@ Recorded during implementation (25 Oct 2026). Each entry states the decision and
 ## Analysis pipeline
 
 - **Microbatch extraction (Nano)** per ≤60 messages / ≈0.6 × input-token cap, with 10 preceding context messages that may not be assigned. Uncovered messages get one retry, then a visible "Unclassified messages / Needs review" unit.
-- **Initial taxonomy (Ultra)** is debounced until no extraction for the chat is pending, then proposes a flat node list (max 40 nodes/call). Nodes flagged `may_subdivide` with ≥2 direct units become **refinement frontiers**; each frontier is a `refine` job sharing the originating `logical_job_id` and therefore the same `budget_ledger` row. Budget exhaustion marks the frontier `budget_paused`; `POST /api/jobs/:id/retry` (or `resumePausedFrontiers`) resumes it without resetting caps.
+- **Initial taxonomy (Super, in windows of up to 40 discussions; was Ultra)** is debounced until no extraction for the chat is pending, then proposes a flat node list (max 40 nodes/call). Nodes flagged `may_subdivide` with ≥2 direct units become **refinement frontiers**; each frontier is a `refine` job sharing the originating `logical_job_id` and therefore the same `budget_ledger` row. Budget exhaustion marks the frontier `budget_paused`; `POST /api/jobs/:id/retry` (or `resumePausedFrontiers`) resumes it without resetting caps.
 - **Single-child chains:** refinement requires ≥2 units, so a branch holding a single discussion is not subdivided further (spec: avoid redundant single-child chains). The fixture content was adjusted accordingly (e.g., *Event planning* holds the *Venue logistics* discussion rather than a one-child *Venue* topic).
 - **Secondary placements** (a message also belonging elsewhere, e.g. a link under Resources) are validated like unit assignments and follow refinement.
 - **JSON mode:** `json_object` by default; `json_schema` only for roles listed in `NEBIUS_JSON_SCHEMA_ROLES` after `models:discover` capability-tests them. Reasoning traces (`<think>`) are stripped before parsing; Zod validation always applies; one Super repair call per invalid output.
@@ -54,6 +54,12 @@ Recorded during implementation (25 Oct 2026). Each entry states the decision and
 - `data-theme` on `<html>` is set before first paint by an inline script (`src/ui/theme.ts`): a stored choice wins, otherwise the OS `prefers-color-scheme`; without JavaScript the page uses night. The toggle renders only after hydration (`useSyncExternalStore`), so server and client HTML match.
 - Map node geometry is part of the sizing contract (A16): the theme changes only colours, fills and the selection halo — never border widths, font sizes or diameters. Node fills use the solid `--surface` colour so edges never show through a node.
 - `next/font` downloads the Google fonts at **build** time and self-hosts them, so the running app makes no font requests; the image build needs network access (as `npm ci` already does). The landing-page starfield is CSS-only and is switched off by the existing reduced-motion rule.
+
+## Four fixed roots (owner change, 27 Oct 2026)
+
+- The owner extended the spec's three roots to four: **Knowledge**, **General Chat**, **Events and Activities** (`EVENTS_ACTIVITIES`) and **Resources**, in that order. Events and Activities holds meetups, hackathons, sessions, trips, deadlines, dates, venues and the planning around them; General Chat keeps greetings, small talk and quick coordination.
+- Existing chats get the new root from migration `0006_events_root`; new chats from `ensureRoots`. The `root` column is plain text, so no type change was needed.
+- Fixtures: the event-like General Chat topics (Event planning, Scheduling, Plans) moved under Events and Activities. Message totals (300 = 120/100/80) are unchanged. The frozen evaluation split now has up to 20 distinct examples per root (74 total: Resources has only 14 distinct messages, where the old split repeated some).
 
 ## Tooling notes
 

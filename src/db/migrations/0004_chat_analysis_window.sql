@@ -1,0 +1,1 @@
+ALTER TABLE "chats" ADD COLUMN "auto_analyze_until" timestamp with time zone;

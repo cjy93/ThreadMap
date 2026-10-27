@@ -182,26 +182,17 @@
    "expected_topic_path": "K/Music/Practice"
   },
   {
-   "native_id": "5BACE4E6D2690B595711",
+   "native_id": "EECF708CED424FE6FABE",
    "chat": "builders",
    "expected_primary_root": "GENERAL_CHAT",
    "admissible_roots": [
     "GENERAL_CHAT"
    ],
-   "expected_topic_path": "G/Coordination/Event planning"
+   "expected_topic_path": "G/Coordination"
   },
   {
-   "native_id": "DB37A2D08DA2AE89E3E1",
+   "native_id": "E2AE8B519B5F7649D250",
    "chat": "builders",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Coordination/Event planning"
-  },
-  {
-   "native_id": "C9E2664E95531DC9C42F",
-   "chat": "study",
    "expected_primary_root": "GENERAL_CHAT",
    "admissible_roots": [
     "GENERAL_CHAT"
@@ -209,7 +200,25 @@
    "expected_topic_path": "G/Casual chat"
   },
   {
-   "native_id": "1BA9A269D723F846B24C",
+   "native_id": "2B66061573E2833BD657",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "96AD6EF74AA5571C35DA",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "617DC98F5B488978E3F5",
    "chat": "builders",
    "expected_primary_root": "GENERAL_CHAT",
    "admissible_roots": [
@@ -227,7 +236,7 @@
    "expected_topic_path": "G/Casual chat"
   },
   {
-   "native_id": "1CE353CF51908980BD01",
+   "native_id": "56FB86AFDD7438B407AC",
    "chat": "builders",
    "expected_primary_root": "GENERAL_CHAT",
    "admissible_roots": [
@@ -236,13 +245,31 @@
    "expected_topic_path": "G/Coordination"
   },
   {
-   "native_id": "27B9CEEA1EAABFF10F71",
+   "native_id": "9D854D57DB4B64ECE1DD",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "FDAF0264EED4C5112F40",
    "chat": "builders",
    "expected_primary_root": "GENERAL_CHAT",
    "admissible_roots": [
     "GENERAL_CHAT"
    ],
    "expected_topic_path": "G/Coordination"
+  },
+  {
+   "native_id": "C73FB0A9C68F3BD8A6E9",
+   "chat": "builders",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
   },
   {
    "native_id": "70AE518B5D4F1259173F",
@@ -254,7 +281,7 @@
    "expected_topic_path": "G/Casual chat"
   },
   {
-   "native_id": "D9B1DCE76D86DCB027F3",
+   "native_id": "DD92790D49BDBB11597B",
    "chat": "builders",
    "expected_primary_root": "GENERAL_CHAT",
    "admissible_roots": [
@@ -263,7 +290,7 @@
    "expected_topic_path": "G/Coordination"
   },
   {
-   "native_id": "1F8BC97EB7BEA5E6B5C4",
+   "native_id": "CAB2ED7612520BF8B014",
    "chat": "builders",
    "expected_primary_root": "GENERAL_CHAT",
    "admissible_roots": [
@@ -272,103 +299,247 @@
    "expected_topic_path": "G/Casual chat"
   },
   {
-   "native_id": "FD841DF6A9D4B6AB1754",
-   "chat": "study",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Scheduling"
-  },
-  {
-   "native_id": "0412E2BCA25B93704E05",
-   "chat": "study",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Scheduling"
-  },
-  {
-   "native_id": "3EB0AF0CD902247E5F9C",
-   "chat": "study",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Casual chat"
-  },
-  {
-   "native_id": "F05482DCF3799EAE794A",
-   "chat": "study",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Scheduling"
-  },
-  {
-   "native_id": "BF3A0F736AC60FE225B0",
-   "chat": "study",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Casual chat"
-  },
-  {
-   "native_id": "605D6CC6837237DBC9AF",
-   "chat": "study",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Scheduling"
-  },
-  {
-   "native_id": "CC40C96D838583178F9B",
-   "chat": "study",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Scheduling"
-  },
-  {
-   "native_id": "3EB02270BE71910AA74C",
-   "chat": "music",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Plans"
-  },
-  {
-   "native_id": "3EB05578D8E6B05FC473",
-   "chat": "music",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Plans"
-  },
-  {
-   "native_id": "3EB0D4F4559A98ABD856",
-   "chat": "music",
-   "expected_primary_root": "GENERAL_CHAT",
-   "admissible_roots": [
-    "GENERAL_CHAT"
-   ],
-   "expected_topic_path": "G/Plans"
-  },
-  {
-   "native_id": "0F869D6FF56A00A15ED2",
+   "native_id": "B23583145DE058F898B9",
    "chat": "builders",
-   "expected_primary_root": "RESOURCES",
+   "expected_primary_root": "GENERAL_CHAT",
    "admissible_roots": [
-    "RESOURCES"
+    "GENERAL_CHAT"
    ],
-   "expected_topic_path": "R/Code repositories"
+   "expected_topic_path": "G/Coordination"
+  },
+  {
+   "native_id": "3EB0A16D5876FF86D9AE",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "B39062ED641BE82B1079",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "3EB094ECAD9BA00E34F6",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "8FFEEBCE4ED1D51B2D8C",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "3EB0EE6BFB34E2026F7A",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "A468976BF687526E0F54",
+   "chat": "study",
+   "expected_primary_root": "GENERAL_CHAT",
+   "admissible_roots": [
+    "GENERAL_CHAT"
+   ],
+   "expected_topic_path": "G/Casual chat"
+  },
+  {
+   "native_id": "5BACE4E6D2690B595711",
+   "chat": "builders",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Event planning"
+  },
+  {
+   "native_id": "558E4863081FAC94300E",
+   "chat": "builders",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Event planning"
+  },
+  {
+   "native_id": "85F8C786C8C538E6AB7E",
+   "chat": "music",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Plans"
+  },
+  {
+   "native_id": "3B0C9B91BFCB8FD2DCC2",
+   "chat": "study",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Scheduling"
+  },
+  {
+   "native_id": "8D9DAA893E6969C296D5",
+   "chat": "study",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Scheduling"
+  },
+  {
+   "native_id": "76F6E1D61213DAB89246",
+   "chat": "study",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Scheduling"
+  },
+  {
+   "native_id": "434418F555CFA25724B5",
+   "chat": "study",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Scheduling"
+  },
+  {
+   "native_id": "0F2022199094965C1E92",
+   "chat": "study",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Scheduling"
+  },
+  {
+   "native_id": "A0506C3B860DD4C0FC2A",
+   "chat": "study",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Scheduling"
+  },
+  {
+   "native_id": "59C7DD80EBF37F3C8070",
+   "chat": "study",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Scheduling"
+  },
+  {
+   "native_id": "3B44FAC2785410CE0810",
+   "chat": "study",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Scheduling"
+  },
+  {
+   "native_id": "2E84E59F7031915A75FC",
+   "chat": "study",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Scheduling"
+  },
+  {
+   "native_id": "3EB048ABDA7922C56E5E",
+   "chat": "music",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Plans"
+  },
+  {
+   "native_id": "3EB0D9E513E001A4BD60",
+   "chat": "music",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Plans"
+  },
+  {
+   "native_id": "3EB0905BF2B256FDEB15",
+   "chat": "music",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Plans"
+  },
+  {
+   "native_id": "3EB0695F549208526FEB",
+   "chat": "music",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Plans"
+  },
+  {
+   "native_id": "3EB09C3FBE826244BF1D",
+   "chat": "music",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Plans"
+  },
+  {
+   "native_id": "3EB0DEE0C1187804918C",
+   "chat": "music",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Plans"
+  },
+  {
+   "native_id": "3EB063724AFF2E46EF50",
+   "chat": "music",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Plans"
+  },
+  {
+   "native_id": "3EB0223935613378021C",
+   "chat": "music",
+   "expected_primary_root": "EVENTS_ACTIVITIES",
+   "admissible_roots": [
+    "EVENTS_ACTIVITIES"
+   ],
+   "expected_topic_path": "E/Plans"
   },
   {
    "native_id": "0F869D6FF56A00A15ED2",
@@ -399,16 +570,6 @@
    "expected_topic_path": "R/Code repositories"
   },
   {
-   "native_id": "EEFD7045982EA2158020",
-   "chat": "builders",
-   "expected_primary_root": "RESOURCES",
-   "admissible_roots": [
-    "RESOURCES",
-    "KNOWLEDGE"
-   ],
-   "expected_topic_path": "R/Code repositories"
-  },
-  {
    "native_id": "5B9E80CF0F55E9667356",
    "chat": "builders",
    "expected_primary_root": "RESOURCES",
@@ -416,15 +577,6 @@
     "RESOURCES"
    ],
    "expected_topic_path": "R/Web links"
-  },
-  {
-   "native_id": "C4769ECD467449DFF06A",
-   "chat": "builders",
-   "expected_primary_root": "RESOURCES",
-   "admissible_roots": [
-    "RESOURCES"
-   ],
-   "expected_topic_path": "R/Code repositories"
   },
   {
    "native_id": "C4769ECD467449DFF06A",
@@ -463,15 +615,6 @@
    "expected_topic_path": "R/Books/Programming books"
   },
   {
-   "native_id": "6A751F7E019AC6E7AD57",
-   "chat": "study",
-   "expected_primary_root": "RESOURCES",
-   "admissible_roots": [
-    "RESOURCES"
-   ],
-   "expected_topic_path": "R/Books/Programming books"
-  },
-  {
    "native_id": "43CCEE3A7F51D24CFF77",
    "chat": "study",
    "expected_primary_root": "RESOURCES",
@@ -490,15 +633,6 @@
    "expected_topic_path": "R/Books/Programming books"
   },
   {
-   "native_id": "47C048EF30B7A5183774",
-   "chat": "study",
-   "expected_primary_root": "RESOURCES",
-   "admissible_roots": [
-    "RESOURCES"
-   ],
-   "expected_topic_path": "R/Books/Programming books"
-  },
-  {
    "native_id": "3EB0810B80ADE3E5CEAA",
    "chat": "study",
    "expected_primary_root": "RESOURCES",
@@ -506,15 +640,6 @@
     "RESOURCES"
    ],
    "expected_topic_path": "R/Web links"
-  },
-  {
-   "native_id": "3EB0748156B665C2A6C2",
-   "chat": "study",
-   "expected_primary_root": "RESOURCES",
-   "admissible_roots": [
-    "RESOURCES"
-   ],
-   "expected_topic_path": "R/Books/Programming books"
   },
   {
    "native_id": "3EB0748156B665C2A6C2",
@@ -624,7 +749,7 @@
    "reason": "unrelated chats/subjects"
   },
   {
-   "a": "builders:G/Coordination",
+   "a": "builders:E/Event planning",
    "b": "music:K/Music/Theory",
    "expected_related": false,
    "reason": "unrelated chats/subjects"
@@ -649,7 +774,7 @@
   },
   {
    "a": "builders:K/Programming/Python",
-   "b": "music:G/Plans",
+   "b": "music:E/Plans",
    "expected_related": false,
    "reason": "unrelated chats/subjects"
   },

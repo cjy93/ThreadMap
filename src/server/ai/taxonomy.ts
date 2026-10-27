@@ -32,6 +32,11 @@ const norm = (t: string) => t.normalize('NFKC').trim().toLocaleLowerCase('und');
  * Validate a proposal. `allowedParents` restricts where new nodes may attach
  * (refinement of one branch); `allowedTargets` restricts unit assignment.
  */
+/** Whether a model-proposed title can name a topic: it must contain a letter or digit. */
+export function isTopicTitle(title: string): boolean {
+  return /[\p{L}\p{N}]/u.test(title);
+}
+
 export function validateTaxonomy(
   tree: Tree,
   proposal: Taxonomy,
@@ -97,6 +102,12 @@ export function validateTaxonomy(
     const parentRef = r.parentRef.kind === 'new' ? alias.get(r.parentRef.key) : r.parentRef;
     if (!parentRef) return;
     const title = n.title.trim();
+    // A title with no letters or digits (e.g. "}],", a fragment of the model's JSON) is not a
+    // topic: its units and subtopics go to its parent instead.
+    if (!isTopicTitle(title)) {
+      alias.set(key, parentRef);
+      return;
+    }
     if (parentRef.kind === 'existing') {
       const parent = tree.nodes.get(parentRef.id)!;
       const same = parent.childIds.map((c) => tree.nodes.get(c)!).find((c) => norm(c.title) === norm(title));

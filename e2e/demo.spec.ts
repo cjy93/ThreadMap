@@ -21,28 +21,13 @@ async function fit(page: Page) {
 
 const nodeBody = (page: Page, title: string) => page.locator('.cnode', { has: page.locator('.label', { hasText: new RegExp(`^${title}$`) }) }).locator('.body');
 
-test('map sizes, depth control invariance and deep access from an ancestor', async ({ page }) => {
+test('map sizes and deep access from an ancestor', async ({ page }) => {
   await openDemo(page);
   await page.getByRole('button', { name: 'All', exact: true }).click();
   await expect(page.getByRole('status').first()).toContainText('Chat: 120 messages');
-  const knowledge = nodeBody(page, 'Knowledge');
-  const before = await knowledge.boundingBox();
-  const countBefore = await knowledge.textContent();
-  const zoom = await page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform);
-
-  for (const d of ['0', '1', 'all', '2']) {
-    await page.getByLabel('Show depth').selectOption(d);
-    await expect(page.getByRole('status').first()).toContainText(`Depth ${d}`);
-    await expect(knowledge).toHaveText(countBefore!);
-  }
-  await page.getByLabel('Show depth').selectOption('1');
-  await expect(page.locator('.cnode .label', { hasText: /^Hackathons$/ })).toHaveCount(0);
-  // Same logical size (camera unchanged) at a different depth.
-  const zoomAfter = await page.evaluate(() => (document.querySelector('.react-flow__viewport') as HTMLElement).style.transform);
-  if (zoom === zoomAfter) {
-    const after = await knowledge.boundingBox();
-    expect(Math.round(after!.width)).toBe(Math.round(before!.width));
-  }
+  // There is no depth control any more: every level loads and branches open from the map.
+  await expect(page.getByLabel('Show depth')).toHaveCount(0);
+  await expect(nodeBody(page, 'Knowledge')).toBeVisible();
   // Open Programming (depth 1) and reach the six-level-deep file without expanding.
   await fit(page);
   await nodeBody(page, 'Programming').dispatchEvent('click');
@@ -63,9 +48,9 @@ test('map sizes, depth control invariance and deep access from an ancestor', asy
   await expect(page.getByRole('article').locator('strong.missed')).toHaveText('Missed'); // no auto-reversal
 });
 
-test('outline parity, keyboard access and size legend', async ({ page }) => {
+test('outline parity, keyboard access and an unobstructed map', async ({ page }) => {
   await openDemo(page);
-  await expect(page.getByLabel('Size legend')).toContainText('Size represents matching messages; scale compressed');
+  await expect(page.getByLabel('Size legend')).toHaveCount(0);
   await page.getByRole('button', { name: 'Outline' }).click();
   const rows = page.getByRole('treeitem');
   await expect(rows.first()).toBeVisible();
@@ -81,8 +66,6 @@ test('combined filters and cross-chat related evidence', async ({ page }) => {
   await openDemo(page);
   await page.getByRole('button', { name: /Programming Study Group/ }).click();
   await page.getByRole('button', { name: 'All', exact: true }).click();
-  await page.getByLabel('Show depth').selectOption('all');
-  await expect(page.getByRole('status').first()).toContainText('Depth all');
   await fit(page);
   await nodeBody(page, 'Tokens').dispatchEvent('click');
   await page.getByRole('tab', { name: 'Related chats' }).click();
