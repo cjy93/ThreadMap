@@ -45,8 +45,9 @@ search out of the database.
 > - Checked live: a non-SSL connection is refused (`ESSLREQUIRED`); `verify-full` with a
 >   wrong CA (the public CA bundle) is refused (`certificate verify failed`); the right CA works.
 > - Supabase's session pooler allows **15 connections** (free plan); pools are capped
->   (`DB_POOL_MAX=2`, `PGBOSS_POOL_MAX=2`, at most 12 in all) — before this the app could hit
->   `EMAXCONNSESSION`.
+>   (`DB_POOL_MAX=2`, `COMPANION_DB_POOL_MAX=5`, `PGBOSS_POOL_MAX=1`, at most 14 in all) —
+>   before this the app could hit `EMAXCONNSESSION`. With the companion at 2, saving a new
+>   link's history starved its lease renewal and the link was logged out (fixed 28 Oct).
 > - NVIDIA Brev: `deploy/vm/compose.supabase.yaml` (hosted mode, CA required, no bundled
 >   database), ready for when the instance is set up.
 >

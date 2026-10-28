@@ -162,4 +162,11 @@ describe('supervisor environment allowlists', () => {
     expect(work.BETTER_AUTH_SECRET).toBeUndefined();
     expect(work.DATABASE_URL).toBe('work');
   });
+
+  it('lets one child override the shared pool size', () => {
+    const env = { DB_POOL_MAX: '2', COMPANION_DB_POOL_MAX: '5' };
+    expect(childEnv(CHILDREN[0], env).DB_POOL_MAX).toBe('2');
+    expect(childEnv(CHILDREN[1], env).DB_POOL_MAX).toBe('5');
+    expect(childEnv(CHILDREN[2], env).DB_POOL_MAX).toBe('2');
+  });
 });

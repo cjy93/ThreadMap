@@ -22,7 +22,9 @@ services:
       WORKER_DATABASE_URL: '${SUPABASE_DB_URL}'
       DATABASE_CA_CERT_FILE: /run/secrets/supabase-ca.crt
       APP_MODE: hosted
-      # Supabase's session pooler allows 15 connections (free plan); the app uses at most 12.
+      # Supabase's session pooler allows 15 connections (free plan); the app uses at most 14:
+      # web 2+1, companion 5+1+1 (history sync must not starve its lease), worker 2+1+1.
       DB_POOL_MAX: '2'
-      PGBOSS_POOL_MAX: '2'
+      COMPANION_DB_POOL_MAX: '5'
+      PGBOSS_POOL_MAX: '1'
     volumes: ['./supabase-ca.crt:/run/secrets/supabase-ca.crt:ro']

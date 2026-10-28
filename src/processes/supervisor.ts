@@ -43,6 +43,9 @@ export const CHILDREN: ChildSpec[] = [
 export function childEnv(spec: ChildSpec, env: Env): Env {
   const out: Env = { PROCESS_NAME: spec.name };
   for (const k of [...COMMON, ...spec.allow]) if (env[k] !== undefined) out[k] = env[k];
+  // Per-child pool size (e.g. COMPANION_DB_POOL_MAX) overrides the shared DB_POOL_MAX.
+  const ownPool = env[`${spec.name.toUpperCase()}_DB_POOL_MAX`];
+  if (ownPool !== undefined) out.DB_POOL_MAX = ownPool;
   out.DATABASE_URL = env[spec.dbUrlFrom] ?? env.DATABASE_URL;
   return { ...out, ...spec.extra };
 }
