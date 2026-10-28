@@ -51,7 +51,7 @@ cannot, open ports 80/443 instead and use `--profile https` — see `README.md` 
 | `LLM_UNLIMITED_PHONES=` | as in `.env.compose` |
 | `DOMAIN=` | the tunnel URL's host, without `https://` |
 | `POSTGRES_PASSWORD=` | any text (unused with Supabase, currently required by the file) |
-| `AUTO_DELETE_AFTER_MINUTES=` | `2` (the owner's choice, 28 Oct 2026; same as locally) — already in the example file |
+| `AUTO_DELETE_AFTER_MINUTES=` | `30` (the default; the owner found 2 too short) — already in the example file |
 
 Start from `cp deploy/vm/env.vm.example deploy/vm/.env.vm`. Never print the values.
 
