@@ -1,0 +1,28 @@
+# Run ThreadMap on NVIDIA Brev with its database on Supabase (no local database container).
+#   docker compose --env-file .env.vm -f compose.yaml -f compose.supabase.yaml up -d --build
+# (add --profile https for Caddy). Needs in .env.vm: SUPABASE_DB_URL (session pooler, port
+# 5432 — never the transaction pooler), and supabase-ca.crt next to this file. Every
+# connection is TLS with Supabase's certificate and hostname verified; hosted mode refuses
+# to start without the certificate. See docs/threadmap/ENCRYPTION.md.
+services:
+  db:
+    # The bundled database is not started (only with --profile localdb).
+    profiles: ['localdb']
+  migrate:
+    depends_on: !reset []
+    environment:
+      DATABASE_URL: '${SUPABASE_DB_URL:?set SUPABASE_DB_URL in .env.vm}'
+      DATABASE_CA_CERT_FILE: /run/secrets/supabase-ca.crt
+      APP_MODE: hosted
+    volumes: ['./supabase-ca.crt:/run/secrets/supabase-ca.crt:ro']
+  app:
+    environment:
+      DATABASE_URL: '${SUPABASE_DB_URL:?set SUPABASE_DB_URL in .env.vm}'
+      COMPANION_DATABASE_URL: '${SUPABASE_DB_URL}'
+      WORKER_DATABASE_URL: '${SUPABASE_DB_URL}'
+      DATABASE_CA_CERT_FILE: /run/secrets/supabase-ca.crt
+      APP_MODE: hosted
+      # Supabase's session pooler allows 15 connections (free plan); the app uses at most 12.
+      DB_POOL_MAX: '2'
+      PGBOSS_POOL_MAX: '2'
+    volumes: ['./supabase-ca.crt:/run/secrets/supabase-ca.crt:ro']

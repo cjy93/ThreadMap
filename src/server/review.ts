@@ -73,19 +73,20 @@ export async function setReview(
  * touch: the complete matching subtree of a node (including hidden/unloaded
  * descendants and beyond the first content page). Depth is not an input.
  */
-export async function createBulkSnapshot(db: Db, scope: ReviewScope, chatId: string, nodeId: string | null, filter: ContentFilter) {
+export async function createBulkSnapshot(db: Db, scope: ReviewScope, chatId: string, nodeId: string | null, filter: ContentFilter, mapChatId = chatId) {
   const [chat] = await db.select().from(s.chats).where(and(eq(s.chats.id, chatId), eq(s.chats.workspaceId, scope.workspaceId)));
   if (!chat) throw new SafeError('chat not found', 404, 'not_found');
-  const matching = matchingMessagesSql({ userId: scope.userId, workspaceId: scope.workspaceId, chatIds: [chatId] }, filter);
+  // Marking a topic Read also clears the filler in it, though the map does not list it.
+  const matching = matchingMessagesSql({ userId: scope.userId, workspaceId: scope.workspaceId, chatIds: [chatId] }, { ...filter, includeFiller: true });
   let rows: { id: string; content_revision: number }[];
   if (nodeId) {
-    const tree = await loadTree(db, chatId);
+    const tree = await loadTree(db, mapChatId);
     let membership;
     if (tree.nodes.has(nodeId)) {
       const ids = descendantIds(tree, nodeId);
-      membership = sql`SELECT p.message_id FROM placements p WHERE p.chat_id = ${chatId}::uuid AND p.topic_id IN (${sql.join(ids.map((i) => sql`${i}::uuid`), sql`, `)})`;
+      membership = sql`SELECT p.message_id FROM placements p WHERE p.chat_id = ${mapChatId}::uuid AND p.topic_id IN (${sql.join(ids.map((i) => sql`${i}::uuid`), sql`, `)})`;
     } else {
-      membership = sql`SELECT p.message_id FROM placements p WHERE p.chat_id = ${chatId}::uuid AND p.discussion_id = ${nodeId}::uuid`;
+      membership = sql`SELECT p.message_id FROM placements p WHERE p.chat_id = ${mapChatId}::uuid AND p.discussion_id = ${nodeId}::uuid`;
     }
     rows = (await db.execute<{ id: string; content_revision: number }>(sql`
       WITH mt AS (${matching}) SELECT DISTINCT mt.id, mt.content_revision FROM mt WHERE mt.id IN (${membership}) ORDER BY mt.id`)).rows;
@@ -102,7 +103,11 @@ export async function createBulkSnapshot(db: Db, scope: ReviewScope, chatId: str
       pairs: rows.map((r) => ({ m: r.id, r: r.content_revision })),
     })
     .returning({ id: s.bulkReviewSnapshots.id });
-  return { snapshotId: snap.id, count: rows.length };
+  // Small talk is marked too (it stays out of the map's counts), so say how much of the total it is.
+  const filler = rows.length
+    ? (await db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM messages WHERE filler AND id IN (${sql.join(rows.map((r) => sql`${r.id}::uuid`), sql`, `)})`)).rows[0].n
+    : 0;
+  return { snapshotId: snap.id, count: rows.length, filler };
 }
 
 /** Apply a frozen snapshot. Idempotent: re-execution returns the first result. */

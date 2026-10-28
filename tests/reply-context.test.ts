@@ -79,10 +79,10 @@ describe('reply-aware analysis', () => {
     // --- What the extraction model was shown ---
     const extract = provider.requests.find((r) => r.operation === 'extract');
     expect(extract).toBeDefined();
-    const input = JSON.parse(extract!.user) as { context_before: PromptMessage[]; messages: PromptMessage[] };
+    const input = JSON.parse(extract!.user) as { context: PromptMessage[]; messages: PromptMessage[] };
     const byText = (text: string) => input.messages.filter((m) => m.text === text);
     const [far, control] = byText(VAGUE);
-    const quoted = input.context_before.find((c) => c.text.startsWith(target.body.slice(0, 200)));
+    const quoted = input.context.find((c) => c.text.startsWith(target.body.slice(0, 200)));
     expect(quoted, 'out-of-window quoted message offered as context').toBeDefined();
     expect(quoted!.ref).toMatch(/^q\d+$/);
     expect(far.reply_to).toBe(quoted!.ref);

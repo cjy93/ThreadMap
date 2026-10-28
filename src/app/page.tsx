@@ -42,7 +42,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ h
   return (
     <main className="landing">
       <LandingTop />
-      <div className="kicker">WhatsApp → knowledge map · NVIDIA Nemotron on Nebius</div>
+      <div className="kicker">WhatsApp → knowledge map · NVIDIA Nemotron on Nebius Token Factory · hosted on NVIDIA Brev</div>
       <h1>
         Every busy chat, <em>mapped</em> to its sources.
       </h1>

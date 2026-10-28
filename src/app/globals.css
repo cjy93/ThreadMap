@@ -437,3 +437,51 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .summary-drop > summary:hover { color: var(--text); }
 .summary-drop > ul, .summary-drop > p { max-height: 40vh; overflow: auto; margin: 0; padding: 4px 12px 10px 30px; border-top: 1px solid var(--border); }
 .summary-drop > p { padding-left: 12px; }
+/* The controls fold up while a topic or an answer is open: only the chat name and "▾ Show controls" stay. */
+.fold-btn { padding: 4px 10px; font-size: 13px; color: var(--muted); }
+.shell.head-folded { grid-template-rows: auto 1fr; }
+.shell.head-folded .left { grid-row: 1 / 3; }
+.shell.head-folded .status { display: none; }
+.shell.head-folded .topbar { padding-top: 6px; padding-bottom: 6px; }
+.shell.head-folded .topbar > :not(.menu-btn, strong, .fold-btn) { display: none; }
+.shell.head-folded .topbar .fold-btn { margin-left: auto; color: var(--text); }
+.shell:not(.head-folded) .status { animation: head-drop 160ms ease; }
+@keyframes head-drop { from { opacity: 0; transform: translateY(-6px); } }
+@media (min-width: 901px) {
+  .shell.head-folded .topbar .menu-btn { height: 36px; }
+}
+@media (max-width: 900px) {
+  .shell.head-folded { grid-template-rows: auto auto auto 1fr; }
+  .shell.head-folded .left { grid-row: auto; }
+}
+/* A message's whole discussion, as its own scrolling list; small talk is dimmed (kept here, left off the map). */
+.thread-catalog { max-height: 62vh; overflow: auto; padding: 2px 4px 8px; margin-top: 8px; position: relative; }
+/* Not sticky: over a translucent panel a pinned title showed the messages through it. */
+.thread-catalog h4 { padding: 6px 0; }
+.thread button.thread-label { border: none; background: none; text-align: left; padding: 2px 0; cursor: pointer; color: var(--accent); }
+.thread .tmsg.filler { opacity: 0.6; }
+/* An opened chat with nothing saved yet explains itself over the empty map. */
+.empty-chat { position: absolute; z-index: 3; top: 72px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); padding: 14px 18px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); box-shadow: 0 12px 32px var(--glass-shadow); }
+.empty-chat h3 { margin: 0 0 6px; font-family: var(--font-fraunces), Georgia, serif; font-weight: 400; font-size: 19px; }
+.empty-chat p, .empty-chat li { font-size: 14px; line-height: 1.5; }
+.empty-chat ul { padding-left: 20px; margin: 6px 0 0; }
+/* Lead-up to a discussion, and the message a reply quotes. */
+.thread .thread-label { font-size: 12px; color: var(--muted); margin: 2px 0; }
+.thread .tmsg.earlier { opacity: 0.7; border-style: dashed; }
+.thread .quote { display: block; width: 100%; text-align: left; margin: 2px 0 6px; padding: 4px 8px; border: none; border-left: 3px solid var(--accent); border-radius: 6px; background: var(--panel-2); font-size: 12px; color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
+.thread button.quote { cursor: pointer; }
+/* Message boxes: words can be selected and copied; a double-click (or Enter) opens the message. */
+.msg[role='button'], .msg-open[role='button'], .tmsg[role='button'] { user-select: text; -webkit-user-select: text; cursor: text; }
+.msg[role='button']:hover, .tmsg[role='button']:hover { border-color: var(--border-strong); }
+.msg[role='button']:focus-visible, .msg-open[role='button']:focus-visible, .tmsg[role='button']:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* An answer given without WhatsApp's Reply, as Nemotron read it: dashed, unlike a real reply. */
+.thread .quote.inferred { border-left-style: dashed; font-style: italic; }
+/* Find in the Ask map: matches stand out, everything else fades. */
+.concept-find { display: inline-flex; align-items: center; gap: 6px; }
+.concept-find input { width: 180px; padding: 6px 10px; font-size: 13px; }
+.react-flow__node.dimmed { opacity: 0.25; }
+.react-flow__node.found { filter: drop-shadow(0 0 6px var(--accent)); }
+/* Bulk review: its choices sit in their own outlined panel, unlike the tabs above. */
+.bulk-panel { margin-top: 8px; padding: 8px 10px; border: 1px dashed var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.bulk-title { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+.bulk-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }

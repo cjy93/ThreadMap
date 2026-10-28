@@ -10,8 +10,11 @@ import { dispatchOutbox, maybeScheduleInitialTaxonomy, resumeStrandedBuilds, run
 import { NebiusModelProvider, type ModelProvider, type Role } from '../server/ai/provider';
 import { getDb, pgSslOptions } from '../server/db';
 import { purgeExpiredDemos } from '../server/demo';
+import { deleteAbandoned } from '../server/presence';
 import { sweepExpired } from '../server/ingest/ingest';
 import { getStorage } from '../server/storage';
+import { BudgetExceededError } from '../server/ai/router';
+import { inferAnswers } from '../server/api/answers';
 import { answerQuestion, interpretRequest } from '../server/api/ask';
 import { ASK_CHANNEL, ASK_REPLY_CHANNEL } from '../server/notify';
 import pg from 'pg';
@@ -35,7 +38,8 @@ async function main() {
     log('provider_missing', { note: 'NEBIUS_API_KEY not configured; sources are captured and analysis stays pending' });
   }
 
-  const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, ssl: pgSslOptions(), max: 4, schema: 'pgboss' });
+  // The job queue's own connections; a hosted pooler may cap the whole app (Supabase free: 15).
+  const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, ssl: pgSslOptions(), max: Number(process.env.PGBOSS_POOL_MAX ?? 4), schema: 'pgboss' });
   boss.on('error', (e) => log('boss_error', { error: e instanceof Error ? e.name : 'unknown' }));
   await boss.start();
   await boss.createQueue(QUEUE, { retryLimit: 2, retryBackoff: true, retryDelay: 10 }).catch(() => undefined);
@@ -50,14 +54,21 @@ async function main() {
       void (async () => {
         let id = '';
         try {
-          const req = JSON.parse(n.payload ?? '{}') as { id: string; kind?: 'answer'; workspaceId: string; chatIds: string[]; question: string; messageIds?: string[] };
+          const req = JSON.parse(n.payload ?? '{}') as { id: string; kind?: 'answer' | 'answers'; workspaceId: string; chatIds: string[]; question: string; messageIds?: string[]; messageId?: string };
           id = req.id;
-          const r = req.kind === 'answer' ? await answerQuestion(deps, req.workspaceId, req.chatIds, req.question, req.messageIds ?? []) : await interpretRequest(deps, req.workspaceId, req.chatIds, req.question);
+          const r =
+            req.kind === 'answer'
+              ? await answerQuestion(deps, req.workspaceId, req.chatIds, req.question, req.messageIds ?? [])
+              : req.kind === 'answers'
+                ? await inferAnswers(deps, req.workspaceId, req.messageId ?? '')
+                : await interpretRequest(deps, req.workspaceId, req.chatIds, req.question);
           await db.execute(sql`SELECT pg_notify(${ASK_REPLY_CHANNEL}, ${JSON.stringify({ id, ok: true, ...r })})`);
         } catch (e) {
           // The reason (e.g. "prompt too large", "provider overloaded") carries no chat content.
           log('ask_failed', { error: e instanceof Error ? `${e.name}: ${e.message.slice(0, 120)}` : 'unknown' });
-          if (id) await db.execute(sql`SELECT pg_notify(${ASK_REPLY_CHANNEL}, ${JSON.stringify({ id, ok: false })})`).catch(() => undefined);
+          // Tell the page why, so it does not claim Nemotron was merely slow.
+          const reason = e instanceof BudgetExceededError ? `budget_${e.scope}` : 'error';
+          if (id) await db.execute(sql`SELECT pg_notify(${ASK_REPLY_CHANNEL}, ${JSON.stringify({ id, ok: false, reason })})`).catch(() => undefined);
         }
       })();
     });
@@ -96,7 +107,7 @@ async function main() {
       const waiting = await db.execute<{ chat_id: string }>(sql`
         SELECT DISTINCT u.chat_id FROM analysis_units u JOIN chats c ON c.id = u.chat_id
         JOIN workspaces w ON w.id = c.workspace_id
-        WHERE u.assigned_topic_id IS NULL AND c.taxonomy_version = 0 AND c.selected AND w.mode = 'private'`);
+        WHERE u.assigned_topic_id IS NULL AND c.taxonomy_version = 0 AND (c.selected OR c.map_of IS NOT NULL) AND w.mode = 'private'`);
       for (const r of waiting.rows) await maybeScheduleInitialTaxonomy(db, r.chat_id);
       // A map build that failed partway resumes on its own (picked up below as a pending job).
       const resumed = await resumeStrandedBuilds(db);
@@ -112,6 +123,14 @@ async function main() {
       await enqueue(pending.rows.map((p) => p.id));
       // Jobs left 'running' by a crashed worker are reset to pending after 10 minutes.
       await db.execute(sql`UPDATE analysis_jobs SET status = 'pending' WHERE status = 'running' AND started_at < now() - interval '10 minutes'`);
+      // Jobs paused by the account allowance or the day's budget try again every few minutes, so
+      // raising the allowance (or a new day) carries on by itself; while the budget still blocks
+      // them they pause again before any model call. A job's own call cap (runaway guard) stays paused.
+      const retried = await db.execute(sql`
+        UPDATE analysis_jobs SET status = 'pending', safe_error = NULL
+        WHERE status = 'budget_paused' AND (safe_error LIKE '%(user)%' OR safe_error LIKE '%(day)%')
+          AND completed_at < now() - interval '5 minutes'`);
+      if (retried.rowCount) log('budget_paused_retried', { count: retried.rowCount });
     } catch (e) {
       log('tick_failed', { error: e instanceof Error ? e.name : 'unknown' });
     } finally {
@@ -122,6 +141,10 @@ async function main() {
   const t2 = setInterval(() => {
     void sweepExpired(db, getStorage()).catch(() => undefined);
     void purgeExpiredDemos(db).catch(() => undefined);
+    // Accounts with no ThreadMap page open for a while are deleted (see presence.ts).
+    void deleteAbandoned(db)
+      .then((n) => n && log('accounts_auto_deleted', { count: n }))
+      .catch(() => undefined);
   }, 60_000);
   await tick();
   log('started');

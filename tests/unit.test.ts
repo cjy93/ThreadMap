@@ -190,11 +190,11 @@ describe('projection budget', () => {
     }
     tree.maxDepth = 3;
     const view = { ...loadViewConfig({}), maxVisibleNodes: 200 };
-    const p = projectMap({ tree, discussions: [], counts: { topics: new Map(), discussions: new Map(), countVersion: 'x', filterFingerprint: 'y' }, depth: 'all', collapsed: new Set(), childOffsets: {}, showDiscussions: false, selectedTopicIds: [], filterActive: false, view });
+    const p = projectMap({ tree, discussions: [], counts: { topics: new Map(), discussions: new Map(), countVersion: 'x', filterFingerprint: 'y' }, depth: 'all', collapsed: new Set(), childOffsets: {}, selectedTopicIds: [], filterActive: false, view });
     expect(p.nodes.length).toBeLessThanOrEqual(200);
     const h = p.nodes.find((n) => n.id === 'h')!;
     expect(h.next_child_offset).toBe(50);
-    const page2 = projectMap({ tree, discussions: [], counts: { topics: new Map(), discussions: new Map(), countVersion: 'x', filterFingerprint: 'y' }, depth: 'all', collapsed: new Set(), focusId: 'h', childOffsets: { h: 250 }, showDiscussions: false, selectedTopicIds: [], filterActive: false, view });
+    const page2 = projectMap({ tree, discussions: [], counts: { topics: new Map(), discussions: new Map(), countVersion: 'x', filterFingerprint: 'y' }, depth: 'all', collapsed: new Set(), focusId: 'h', childOffsets: { h: 250 }, selectedTopicIds: [], filterActive: false, view });
     expect(page2.nodes.length).toBe(51);
     expect(page2.focus!.breadcrumbs.map((b) => b.depth)).toEqual([0, 1, 2]);
     expect(page2.nodes.find((n) => n.id === 'h')!.depth).toBe(2); // focus does not renumber
@@ -207,5 +207,99 @@ describe('util', () => {
     expect(extractUrls('see https://a.org/x?utm_source=1#f, and http://b.io.')).toEqual(['https://a.org/x?utm_source=1#f', 'http://b.io']);
     expect(canonicalUrl('https://WWW.A.org/x/?utm_source=1#f')).toBe('https://a.org/x');
     expect(extractJson('<think>blah {x}</think>```json\n{"a":"}"}\n```')).toBe('{"a":"}"}');
+  });
+});
+
+describe('top-down building', () => {
+  // Eight broad topics proposed under Knowledge (which already has Programming), plus a
+  // narrower one nested beneath a new topic in the same answer.
+  const proposal = {
+    nodes: [
+      ...['Music', 'Art', 'History', 'Finance', 'Health', 'Travel', 'Cooking', 'Sport'].map((title, i) => ({ key: `b${i}`, parent: 'ROOT:KNOWLEDGE', title, aliases: [], may_subdivide: false })),
+      { key: 'deep', parent: 'b1', title: 'Drawing', aliases: [], may_subdivide: false },
+    ],
+    assignments: Array.from({ length: 8 }, (_, i) => ({ unit_key: `u${i}`, topic: `b${i}` })).concat([{ unit_key: 'u8', topic: 'deep' }]),
+    secondary_placements: [],
+    no_useful_subdivision: false,
+  };
+  const units = Array.from({ length: 9 }, (_, i) => ({ unitKey: `u${i}`, primaryRoot: 'KNOWLEDGE' as const, messageRefs: [`m${i}`] }));
+
+  it('never lets a level go over six, and builds one level at a time', () => {
+    const tree = makeTree();
+    const plan = validateTaxonomy(tree, proposal, units, { newParentIds: new Set(tree.roots.map((r) => r.id)), oneLevel: true });
+    // Knowledge already has Programming: five more fit, the rest stay on Knowledge to be placed later.
+    const underK = plan.newTopics.filter((t) => t.parentRef.kind === 'existing' && t.parentRef.id === 'K');
+    expect(underK.length).toBe(5);
+    expect(plan.newTopics.every((t) => t.parentRef.kind === 'existing')).toBe(true);
+    expect(plan.unitTargets.get('u7')).toEqual({ kind: 'existing', id: 'K' });
+    // "Drawing" waits for Art to be refined; its discussion goes to Art, marked to split next.
+    expect(plan.newTopics.find((t) => t.title === 'Drawing')).toBeUndefined();
+    const art = plan.newTopics.find((t) => t.title === 'Art')!;
+    expect(plan.unitTargets.get('u8')).toEqual({ kind: 'new', key: art.key });
+    expect(art.narrower).toBe(true);
+  });
+
+  it('adds nothing beneath an existing topic while building the first level', () => {
+    const tree = makeTree();
+    const plan = validateTaxonomy(
+      tree,
+      { nodes: [{ key: 'n', parent: 'h', title: 'Solutions', aliases: [], may_subdivide: false }], assignments: [{ unit_key: 'u0', topic: 'n' }], secondary_placements: [], no_useful_subdivision: false },
+      units.slice(0, 1),
+      { newParentIds: new Set(tree.roots.map((r) => r.id)), oneLevel: true },
+    );
+    expect(plan.newTopics).toEqual([]);
+    expect(plan.unitTargets.get('u0')).toEqual({ kind: 'existing', id: 'h' });
+    expect(plan.subdivideExisting).toEqual(['h']);
+  });
+});
+
+describe('opening branches beyond the node budget', () => {
+  it('loads a branch the budget left out when it is opened, at any depth', () => {
+    // Knowledge > 6 topics > 6 subtopics each > 3 more each: far over a budget of 20 nodes.
+    const nodes = new Map<string, TreeNode>();
+    const add = (id: string, parentId: string | null, depth: number) => {
+      nodes.set(id, { id, parentId, root: 'KNOWLEDGE', kind: parentId ? 'TOPIC' : 'CATEGORY', title: id, depth, childIds: [], needsReview: false, provenance: 'model' });
+      if (parentId) nodes.get(parentId)!.childIds.push(id);
+    };
+    add('K', null, 0);
+    for (let a = 0; a < 6; a++) {
+      add(`a${a}`, 'K', 1);
+      for (let b = 0; b < 6; b++) {
+        add(`a${a}b${b}`, `a${a}`, 2);
+        for (let c = 0; c < 3; c++) add(`a${a}b${b}c${c}`, `a${a}b${b}`, 3);
+      }
+    }
+    const tree: Tree = { chatId: 'c', nodes, roots: [nodes.get('K')!], maxDepth: 3 };
+    const view = { ...loadViewConfig({}), maxVisibleNodes: 20 };
+    const base = { tree, discussions: [], counts: { topics: new Map(), discussions: new Map(), countVersion: 'x', filterFingerprint: 'y' }, depth: 'all' as const, collapsed: new Set<string>(), childOffsets: {}, selectedTopicIds: [], filterActive: false, view };
+
+    const first = projectMap(base);
+    expect(first.nodes.length).toBe(20);
+    // A level-2 topic whose children did not fit says so, so opening it can load them.
+    const cut = first.nodes.find((n) => n.depth === 2 && n.children_shown === 0)!;
+    expect(cut.boundary).toBe(true);
+    expect(cut.child_topic_count).toBe(3);
+
+    // Opened: its children come anyway, and they in turn can be opened.
+    const opened = projectMap({ ...base, expandIds: [cut.id] });
+    const kids = opened.nodes.filter((n) => n.parent_id === cut.id);
+    expect(kids.map((n) => n.depth)).toEqual([3, 3, 3]);
+    expect(opened.nodes.find((n) => n.id === cut.id)!.boundary).toBe(false);
+  });
+});
+
+describe('database TLS', () => {
+  it('verifies the certificate when one is given, and refuses to run without one when required', async () => {
+    const { pgSslOptions } = await import('../src/server/db');
+    expect(pgSslOptions({ DATABASE_CA_CERT: '-----BEGIN CERTIFICATE-----x' })).toEqual({ ca: '-----BEGIN CERTIFICATE-----x', rejectUnauthorized: true });
+    expect(() => pgSslOptions({ DATABASE_REQUIRE_TLS: '1' })).toThrow(/verified TLS is required/);
+    expect(() => pgSslOptions({ APP_MODE: 'hosted' })).toThrow(/verified TLS is required/);
+    expect(pgSslOptions({})).toBeUndefined(); // local container on Docker's private network
+  });
+
+  it('passes the TLS, auto-delete and links settings to the processes that read them', async () => {
+    const { CHILDREN } = await import('../src/processes/supervisor');
+    const worker = CHILDREN.find((c) => c.name === 'worker')!;
+    expect(worker.allow).toEqual(expect.arrayContaining(['AUTO_DELETE_AFTER_MINUTES', 'CROSS_CHAT_LINKS']));
   });
 });

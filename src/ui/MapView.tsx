@@ -201,7 +201,7 @@ export function MapView(props: Props) {
       {/* No size legend over the map: it hid too much of it. Only say so when topics are hidden. */}
       {props.map.truncated_by_budget ? (
         <div className="map-note" role="status">
-          Some topics are hidden — focus a branch to see more
+          Some topics are not loaded yet — click ▾ under a circle to load them
         </div>
       ) : null}
     </div>

@@ -1,6 +1,7 @@
 // ThreadMap PostgreSQL schema. This file is the single owner of table shapes;
 // migrations in ./migrations are generated from it with `npm run db:generate`.
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   customType,
@@ -94,6 +95,9 @@ export const workspaces = pgTable(
     expiresAt: ts('expires_at'),
     // Bumped when the workspace is being deleted so in-flight work is fenced.
     deletionGeneration: integer('deletion_generation').notNull().default(0),
+    // Last time an open ThreadMap page checked in. A private account with no page open for
+    // AUTO_DELETE_AFTER_MINUTES is deleted, as if "Disconnect and delete my data" was pressed.
+    lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex('workspaces_owner_mode_uq').on(t.ownerUserId, t.mode)],
@@ -266,6 +270,11 @@ export const chats = pgTable(
     // Key of the newest message seen (ids and time only, never content), so history can be
     // requested from WhatsApp for a chat selected after its initial history was discarded.
     historyAnchor: jsonb('history_anchor').$type<{ remoteJid: string; id: string; fromMe: boolean; participant: string | null; ts: number }>(),
+    // A one-sided map of another chat ("Map from: You / Others"): this row holds only that map's
+    // topics, discussions and summaries, built from one side's messages, which stay with the chat
+    // in map_of. Hidden like an excluded chat; deleted with its chat.
+    mapOf: uuid('map_of').references((): AnyPgColumn => chats.id, { onDelete: 'cascade' }),
+    mapSide: text('map_side', { enum: ['mine', 'others'] }),
     createdAt: createdAt(),
   },
   (t) => [
@@ -356,6 +365,14 @@ export const messages = pgTable(
     // Starred in WhatsApp (synced from the phone; ThreadMap never stars or unstars).
     starred: boolean('starred').notNull().default(false),
     starredAt: ts('starred_at'),
+    // Nemotron's verdict that the message adds nothing on its own ("ok", "lol", a throwaway
+    // quip): kept in its discussion's thread but left off the map. null = not screened yet.
+    filler: boolean('filler'),
+    // The earlier message this one answers when no WhatsApp reply says so (people often answer a
+    // question from a few messages back without pressing Reply), as Nemotron read the discussion.
+    inferredReplyTo: uuid('inferred_reply_to').references((): AnyPgColumn => messages.id, { onDelete: 'set null' }),
+    // When its discussion was read for such answers (null: not yet).
+    inferredAt: ts('inferred_at'),
     ingestEventType: text('ingest_event_type').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -826,6 +843,15 @@ export const dailyBudget = pgTable('daily_budget', {
   usdMicrosReserved: bigint('usd_micros_reserved', { mode: 'number' }).notNull().default(0),
   usdMicrosUsed: bigint('usd_micros_used', { mode: 'number' }).notNull().default(0),
   calls: integer('calls').notNull().default(0),
+});
+
+// Lifetime inference spend per person: a WhatsApp number ("wa:<fingerprint>",
+// so a fresh QR scan does not reset it) or an unlinked workspace ("ws:<id>").
+export const usageAllowance = pgTable('usage_allowance', {
+  subject: text('subject').primaryKey(),
+  usdMicrosReserved: bigint('usd_micros_reserved', { mode: 'number' }).notNull().default(0),
+  usdMicrosUsed: bigint('usd_micros_used', { mode: 'number' }).notNull().default(0),
+  updatedAt: updatedAt(),
 });
 
 export const modelRuns = pgTable(

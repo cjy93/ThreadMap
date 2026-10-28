@@ -1,5 +1,7 @@
 # ThreadMap implementation handoff
 
+> **Hosting changed (28 Oct 2026):** ThreadMap is deployed on **NVIDIA Brev** — one Docker image next to PostgreSQL on a Brev instance, files on a Docker volume — not on a Nebius Serverless Endpoint with Managed PostgreSQL, Object Storage and SecretStash. See [`deploy/vm/README.md`](../../deploy/vm/README.md). NVIDIA Nemotron still runs on **Nebius Token Factory**. The Nebius hosting described below is the original plan, kept for reference.
+
 Version 2.2 — 25 October 2026 — cloud-hosted linked-device prototype with recursive topics, depth selection, and message-count node sizing.
 
 Prepared for the Nebius x NVIDIA Global AI Hackathon, Best Apps and Agents Track. This revision replaces the earlier export-based and local-first implementation baselines. P0 requires a live Baileys connection and an actual Nebius Serverless Endpoint deployment. Manual transcript exports and uploads are outside P0.

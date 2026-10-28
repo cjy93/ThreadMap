@@ -41,7 +41,14 @@ export class FixtureModelProvider implements ModelProvider {
     // The fixture taxonomy is already grouped as intended.
     else if (op === 'regroup') out = { groups: [] };
     else if (op === 'split') out = { parts: [] };
+    // The fixture's expected counts include every message: nothing is filler here (tests stub their own).
+    else if (op === 'ask_alias') out = { aliases: [] };
+    else if (op === 'answers') out = { links: [] };
+    // The fixture's roots are already right.
+    else if (op === 'roots') out = { roots: [] };
+    else if (op === 'filler') out = { filler: [] };
     // Development stand-in: cites the first matching message, says nothing it cannot support.
+    else if (op === 'answer:merge') out = { answer: 'Fixture answer (development mode, not live inference).', points: (input.findings as { ref: string; text: string }[]).map((f) => ({ text: f.text, refs: [f.ref] })), enough: false };
     else if (op === 'answer') out = { answer: 'Fixture answer (development mode, not live inference).', points: (input.messages as { ref: string }[]).slice(0, 1).map((m) => ({ text: 'First matching message', refs: [m.ref] })), enough: false };
     else out = { ok: true, role: req.role, echo: 'threadmap-capability-check' };
     const text = JSON.stringify(out);

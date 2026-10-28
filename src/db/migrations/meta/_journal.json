@@ -57,6 +57,48 @@
       "when": 1793093730300,
       "tag": "0007_message_starred",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793111447808,
+      "tag": "0008_message_filler",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793150589410,
+      "tag": "0009_usage_allowance",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793153655350,
+      "tag": "0010_pg_trgm",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793154371109,
+      "tag": "0011_side_maps",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793157597302,
+      "tag": "0012_inferred_replies",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793172672613,
+      "tag": "0013_last_seen",
+      "breakpoints": true
     }
   ]
 }

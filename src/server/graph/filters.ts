@@ -16,6 +16,10 @@ export const ContentFilterSchema = z.object({
   tz: z.string().default('Asia/Singapore'),
   includeUndated: z.boolean().default(false),
   topicIds: z.array(z.string().refine(isUuid)).max(50).default([]),
+  // Filler ("ok", "lol", throwaway quips) stays off the map; bulk Read/Missed still covers it.
+  includeFiller: z.boolean().default(false),
+  // "Map from: You / Others": only the owner's messages, or only everyone else's.
+  side: z.enum(['mine', 'others']).optional(),
 });
 export type ContentFilter = z.infer<typeof ContentFilterSchema>;
 
@@ -40,6 +44,7 @@ export function parseContentFilter(params: URLSearchParams, defaults: { tz: stri
       .split(',')
       .map((x) => x.trim())
       .filter(Boolean),
+    side: params.get('side') === 'mine' || params.get('side') === 'others' ? (params.get('side') as 'mine' | 'others') : undefined,
   };
   const r = ContentFilterSchema.safeParse(raw);
   if (!r.success) throw new SafeError('invalid filter parameters');
@@ -81,6 +86,14 @@ export const isReadSql = (m = 'm', rs = 'rs'): SQL =>
  * in `chatIds` within `workspaceId` that matches the content filter. Topic
  * filters include each selected topic's entire recursive subtree (union).
  */
+/** Messages any discussion summary in these chats cites as evidence. */
+export function citedMessagesSql(chatList: SQL): SQL {
+  return sql`SELECT (e->>'m')::uuid FROM analysis_units u,
+    jsonb_array_elements(COALESCE(u.summary_bullets->'bullets', '[]'::jsonb)) b,
+    jsonb_array_elements(COALESCE(b->'evidence', '[]'::jsonb)) e
+    WHERE u.chat_id IN (${chatList})`;
+}
+
 export function matchingMessagesSql(scope: { userId: string; workspaceId: string; chatIds: string[] }, f: ContentFilter): SQL {
   const chatList = sql.join(scope.chatIds.map((c) => sql`${c}::uuid`), sql`, `);
   const parts: SQL[] = [sql`m.workspace_id = ${scope.workspaceId}::uuid`, sql`m.chat_id IN (${chatList})`, eligibleSql('m')];
@@ -91,6 +104,10 @@ export function matchingMessagesSql(scope: { userId: string; workspaceId: string
     const dated = sql.join(range, sql` AND `);
     parts.push(f.includeUndated ? sql`((${dated}) OR m.sent_at IS NULL)` : sql`(m.sent_at IS NOT NULL AND ${dated})`);
   }
+  // Small talk leaves the map, except messages a Nemotron summary cites as its
+  // source: what a summary says must be findable on the map.
+  if (!f.includeFiller) parts.push(sql`(m.filler IS NOT TRUE OR m.id IN (${citedMessagesSql(chatList)}))`);
+  if (f.side) parts.push(f.side === 'mine' ? sql`m.direction = 'outgoing'` : sql`m.direction = 'incoming'`);
   if (f.status === 'missed') parts.push(sql`NOT COALESCE(${isReadSql()}, false)`);
   if (f.status === 'read') parts.push(sql`COALESCE(${isReadSql()}, false)`);
   if (f.topicIds.length) {
@@ -119,5 +136,6 @@ export function filterToSearchParams(f: Partial<ContentFilter>): URLSearchParams
   if (f.tz) p.set('tz', f.tz);
   if (f.includeUndated) p.set('undated', '1');
   if (f.topicIds?.length) p.set('topics', f.topicIds.join(','));
+  if (f.side) p.set('side', f.side);
   return p;
 }

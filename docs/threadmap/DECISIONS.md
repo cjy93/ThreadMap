@@ -47,6 +47,26 @@ Recorded during implementation (25 Oct 2026). Each entry states the decision and
 - Admin execution path inside the private network = one-off **Serverless Jobs** from the same image in the same subnet (`migrate`, `apply-grants`, `bootstrap-origin`, `create-owner`). This is an operational use of Jobs, not analysis offload; analysis stays in the Endpoint's pg-boss worker.
 - Only Nebius CLI commands documented on docs.nebius.com are used (`ai endpoint create/get/list/stop/start/delete`, `ai job create/list/logs`, `mysterybox secret create`, `registry configure-helper`, `msp postgresql v1alpha1 cluster get-by-name`). Installing the Nebius CLI in this coding environment was not permitted, so the script has not been executed against a real account.
 
+## Hosting on NVIDIA Brev (owner change, 28 Oct 2026)
+
+- **Deployed on an NVIDIA Brev instance with Docker Compose** (`deploy/vm/`): PostgreSQL in a container with its data on the `pgdata` volume, the one ThreadMap image (web, companion, worker), and photos/files on the `objects` volume. Nemotron still runs on Nebius Token Factory; the instance only needs a CPU.
+- **HTTPS:** either a Brev tunnel to port 3000 (Brev may ask visitors to sign in) or ports 80/443 opened with Caddy obtaining a certificate (`--profile https`). The app's port is bound to `127.0.0.1`, so it is never reachable on the public IP directly.
+- **Origin:** `PUBLIC_ORIGIN_MODE=explicit` with `APP_URL=https://<DOMAIN>`, instead of the database bootstrap used for Serverless Endpoints. `APP_MODE=development` only so the database on Docker's private network is reached without TLS.
+- **Why:** the owner's choice of platform. The Nebius Serverless Endpoint path (`deploy/nebius/`) is kept but not used.
+
+## Delete on leave (owner change, 28 Oct 2026)
+
+- **No ThreadMap page open for 30 minutes = Disconnect and delete my data.** Each open page posts to `/api/presence` every minute (and when the tab becomes visible), updating `workspaces.last_seen_at`. The worker's minute sweep (`deleteAbandoned`) queues the companion's `delete_account` command once per account (idempotency key), signs out its sessions; the companion logs the device out of WhatsApp and deletes the account with every stored file. An account that never linked a phone is deleted directly.
+- **Why a timeout, not "on close":** a browser cannot reliably report being closed — the unload signal also fires on reloads and navigation, and never fires on crashes, sleep or lost connections. Thirty minutes survives reloads and short drops.
+- **Trade-off:** capture no longer continues with the browser closed; reopening means scanning the QR again and rebuilding maps. `AUTO_DELETE_AFTER_MINUTES=0` turns it off (e.g. for development).
+
+## Database on Supabase, encrypted connections (owner choice, 28 Oct 2026)
+
+- **Choice:** *connection + Supabase at-rest*. Once the database is on Supabase: Supabase's AES-256 at-rest encryption (always on), **Enforce SSL** switched on, and ThreadMap connecting with the Supabase CA (`DATABASE_CA_CERT_FILE`, `APP_MODE=hosted` so it refuses to start without one), certificate and hostname verified. Session pooler or direct connections only (the companion's advisory lock and LISTEN/NOTIFY break under transaction pooling).
+- **Not chosen:** app-side or per-user encryption of message text (it would move search out of the database). WhatsApp credentials stay app-encrypted (AES-256-GCM) as before.
+- **Migrated 28 Oct 2026:** `pg_dump --no-owner --no-privileges` of the local database restored into Supabase in one transaction over `sslmode=verify-full`; all 57 tables' row counts matched; the WhatsApp link moved with the data (no rescan). Locally switched over with a git-ignored `compose.override.yaml` (session pooler, CA file, `DB_POOL_MAX=3` because the free plan's pooler allows few connections); the local `db` container is kept as a fallback. Enforce SSL verified: a non-SSL connection is refused.
+- **Remaining** ("set up encryption"): `APP_MODE=hosted` and the same setup on the Brev instance; runbook in `docs/threadmap/ENCRYPTION.md`.
+
 ## UI theme
 
 - Visual design: a dark navy **night** theme and a peach **twilight** light theme, frosted-glass panels, orange glowing primary buttons, Fraunces display headings, Albert Sans body text and Antonio uppercase labels. It is written in our own CSS, taking the general look of a public portfolio site as a reference; no markup, artwork or code was copied.

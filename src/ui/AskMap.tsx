@@ -21,12 +21,16 @@ import {
   type Node,
   type NodeProps,
 } from '@xyflow/react';
-import { memo, useCallback, useEffect, useMemo } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { PathItem } from './types';
 
 export interface AskResult {
   query: string;
   interpretation: string | null;
+  /** Why the search went ahead on plain words (Nemotron slow, out of allowance or failing). */
+  note?: string | null;
+  /** Nemotron is still reading the question: search again with ?interp=<this> once it has. */
+  interpretation_pending?: string | null;
   terms: string[];
   results: { message_id: string; chat_id: string; sender: string; snippet: string; review: string; topic_paths: PathItem[][] }[];
   topics: { chat_id: string; topic_id: string; path: PathItem[] }[];
@@ -213,6 +217,20 @@ function Inner({ res, onOpenTopic, onOpenMessage }: { res: AskResult } & Handler
     const rename = (label: string) => setNodes((cur) => cur.map((n) => (n.id === id ? { ...n, data: { ...n.data, label } } : n)));
     setNodes((cur) => [...cur, { id, type: 'concept', position: center, data: { kind: 'concept', label: 'New concept', onRename: rename } }]);
   };
+  // Find in this map: matching boxes stand out, the rest fade; Enter steps from one to the next.
+  const [find, setFind] = useState('');
+  // Which match is centred (-1: none yet).
+  const [hit, setHit] = useState(-1);
+  const needle = find.trim().toLocaleLowerCase();
+  const matches = needle ? nodes.filter((n) => `${n.data.label} ${n.data.sub ?? ''}`.toLocaleLowerCase().includes(needle)) : [];
+  const shown = needle ? nodes.map((n) => ({ ...n, className: matches.includes(n) ? 'found' : 'dimmed' })) : nodes;
+  const goTo = (i: number) => {
+    if (!matches.length) return;
+    const k = ((i % matches.length) + matches.length) % matches.length;
+    const n = matches[k];
+    setHit(k);
+    rf.setCenter(n.position.x + 110, n.position.y + 30, { zoom: Math.max(rf.getZoom(), 0.9), duration: 300 });
+  };
   const onConnect = useCallback((c: Connection) => setEdges((cur) => addEdge({ ...c, type: 'default', className: 'e-concept', label: 'relates to' }, cur)), [setEdges]);
 
   const exportJson = () => {
@@ -238,9 +256,28 @@ function Inner({ res, onOpenTopic, onOpenMessage }: { res: AskResult } & Handler
         <button onClick={tidy}>Tidy layout</button>
         <button onClick={addConcept}>+ Concept</button>
         <button onClick={exportJson}>Export</button>
+        <span className="concept-find">
+          <input
+            type="search"
+            aria-label="Find in this map"
+            placeholder="Find in this map"
+            value={find}
+            onChange={(e) => {
+              setFind(e.target.value);
+              setHit(-1);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                goTo(e.shiftKey ? hit - 1 : hit + 1);
+              }
+            }}
+          />
+          {needle ? <span className="counts">{!matches.length ? 'none' : hit >= 0 ? `${hit + 1}/${matches.length}` : `${matches.length} found · Enter`}</span> : null}
+        </span>
       </div>
       <ReactFlow
-        nodes={nodes}
+        nodes={shown}
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
@@ -278,7 +315,7 @@ export function AskMap(props: { res: AskResult; onBack: () => void } & Handlers)
         <Inner {...rest} />
       </ReactFlowProvider>
       <button className="concept-back" onClick={onBack}>
-        ← Back to chat map
+        ← Back to mind map
       </button>
     </div>
   );

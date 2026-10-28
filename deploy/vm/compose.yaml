@@ -1,0 +1,68 @@
+# ThreadMap on NVIDIA Brev (or any VM) with Docker: PostgreSQL, the app and, optionally, HTTPS (Caddy).
+# Everything personal stays on the VM's Docker volumes, never in git:
+#   pgdata   - the database (messages, maps, WhatsApp link)
+#   objects  - downloaded photos and files
+# Recreating containers keeps both. "Disconnect and delete my data" in the app
+# deletes the account's rows and files from them. See README.md here.
+#
+#   docker compose --env-file .env.vm up -d --build                   # behind a Brev tunnel to port 3000
+#   docker compose --env-file .env.vm --profile https up -d --build   # ports 80/443 open, Caddy does HTTPS
+name: threadmap
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: threadmap
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.vm}
+      POSTGRES_DB: threadmap
+    # The database survives container recreation; it is only deleted with `down -v`.
+    volumes: ['pgdata:/var/lib/postgresql/data']
+    # No published port: only the app reaches it, on Docker's private network.
+    healthcheck: { test: ['CMD-SHELL', 'pg_isready -U threadmap'], interval: 3s, retries: 20 }
+
+  migrate:
+    build: { context: ../.. }
+    image: threadmap:vm
+    depends_on: { db: { condition: service_healthy } }
+    environment: { DATABASE_URL: 'postgres://threadmap:${POSTGRES_PASSWORD}@db:5432/threadmap' }
+    command: ['node', 'dist/cli/migrate.js']
+
+  app:
+    image: threadmap:vm
+    restart: unless-stopped
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    env_file: [.env.vm]
+    environment:
+      DATABASE_URL: 'postgres://threadmap:${POSTGRES_PASSWORD}@db:5432/threadmap'
+      COMPANION_DATABASE_URL: 'postgres://threadmap:${POSTGRES_PASSWORD}@db:5432/threadmap'
+      WORKER_DATABASE_URL: 'postgres://threadmap:${POSTGRES_PASSWORD}@db:5432/threadmap'
+      # The public HTTPS address people sign in at (the Brev tunnel's host, or the domain Caddy serves).
+      PUBLIC_ORIGIN_MODE: explicit
+      APP_URL: 'https://${DOMAIN:?set DOMAIN in .env.vm}'
+      BETTER_AUTH_URL: 'https://${DOMAIN}'
+      STORAGE_DRIVER: local
+    volumes: ['objects:/app/.data']
+    # Only on the instance itself: a Brev tunnel or Caddy reaches it; never published on the public IP.
+    ports: ['127.0.0.1:3000:3000']
+
+  caddy:
+    image: caddy:2.8
+    # Only with --profile https (ports 80 and 443 open to the internet instead of a Brev tunnel).
+    profiles: ['https']
+    restart: unless-stopped
+    depends_on: [app]
+    # Caddy gets and renews the HTTPS certificate for DOMAIN by itself (ports 80 and 443 must be open).
+    ports: ['80:80', '443:443']
+    environment: { DOMAIN: '${DOMAIN}' }
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata: {}
+  objects: {}
+  caddy_data: {}
+  caddy_config: {}

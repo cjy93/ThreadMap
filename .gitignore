@@ -226,6 +226,7 @@ __marimo__/
 .env.live
 .env.live.*
 .env.compose
+.env.supabase
 *.pem
 *.key
 secrets/
@@ -238,3 +239,9 @@ playwright-report/
 *.tsbuildinfo
 next-env.d.ts
 deploy/nebius/.state/
+
+# Supabase server CA for verified TLS (see docs/threadmap/ENCRYPTION.md)
+deploy/vm/supabase-ca.crt
+
+# Local switch to Supabase (see compose.override.yaml header)
+compose.override.yaml

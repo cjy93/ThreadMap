@@ -1,0 +1,3 @@
+ALTER TABLE "messages" ADD COLUMN "inferred_reply_to" uuid;--> statement-breakpoint
+ALTER TABLE "messages" ADD COLUMN "inferred_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "messages" ADD CONSTRAINT "messages_inferred_reply_to_messages_id_fk" FOREIGN KEY ("inferred_reply_to") REFERENCES "public"."messages"("id") ON DELETE set null ON UPDATE no action;

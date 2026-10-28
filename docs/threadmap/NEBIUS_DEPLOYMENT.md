@@ -1,5 +1,7 @@
 # ThreadMap cloud deployment runbook
 
+> **Hosting changed (28 Oct 2026):** ThreadMap is deployed on **NVIDIA Brev** — one Docker image next to PostgreSQL on a Brev instance, files on a Docker volume — not on a Nebius Serverless Endpoint with Managed PostgreSQL, Object Storage and SecretStash. See [`deploy/vm/README.md`](../../deploy/vm/README.md). NVIDIA Nemotron still runs on **Nebius Token Factory**. The Nebius hosting described below is the original plan, kept for reference.
+
 Version 2.2 — 25 October 2026 — implementation instructions, not an executed deployment.
 
 ## 1. Deployment decision

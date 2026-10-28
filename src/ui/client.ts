@@ -34,6 +34,32 @@ export interface FilterState {
   to?: string;
   tz: string;
   topics: string[];
+  /** "Map from": a chat's separate map built from only the owner's ("mine") or the others' messages. */
+  side?: 'mine' | 'others';
+}
+
+/**
+ * A message box whose words can be selected and copied (to look something up),
+ * opened by double-click or Enter rather than a single click, which would end
+ * every selection by opening the message.
+ */
+export function openOnDoubleClick(open: () => void) {
+  return {
+    role: 'button',
+    tabIndex: 0,
+    title: 'Double-click to open. Select words to copy them.',
+    onDoubleClick: () => {
+      // The double-click also selected a word; opening is what was meant.
+      window.getSelection()?.removeAllRanges();
+      open();
+    },
+    onKeyDown: (e: { key: string; target: unknown; currentTarget: unknown; preventDefault: () => void }) => {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+        e.preventDefault();
+        open();
+      }
+    },
+  } as const;
 }
 
 export function filterParams(f: FilterState): Record<string, string> {
@@ -41,6 +67,7 @@ export function filterParams(f: FilterState): Record<string, string> {
   if (f.from) p.from = f.from;
   if (f.to) p.to = f.to;
   if (f.topics.length) p.topics = f.topics.join(',');
+  if (f.side) p.side = f.side;
   return p;
 }
 
@@ -62,4 +89,11 @@ export async function leaveAndDeleteAccount(): Promise<void> {
     await authClient.signOut().catch(() => undefined);
     window.location.assign('/');
   }
+}
+
+/** Numbers cited messages across a whole summary: one number per message, in order of first citation. */
+export function sourceNumbers(ids: string[]): Map<string, number> {
+  const n = new Map<string, number>();
+  for (const id of ids) if (!n.has(id)) n.set(id, n.size + 1);
+  return n;
 }

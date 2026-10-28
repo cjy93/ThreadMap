@@ -6,7 +6,7 @@ export interface PathItem {
 
 export interface MapNode {
   id: string;
-  kind: 'CATEGORY' | 'TOPIC' | 'DISCUSSION';
+  kind: 'CATEGORY' | 'TOPIC';
   root: string;
   parent_id: string | null;
   title: string;
@@ -22,6 +22,17 @@ export interface MapNode {
   needs_review: boolean;
   discussion_count: number;
   diameter: number | null;
+}
+
+export interface ChainMessage {
+  message_id: string;
+  sender: string;
+  direction: string;
+  snippet: string | null;
+  sent_at: string | null;
+  depth: number;
+  /** This step is an answer Nemotron found, not a WhatsApp reply. */
+  inferred: boolean;
 }
 
 export interface MapResponse {
@@ -41,7 +52,14 @@ export interface MapResponse {
   focus: { id: string; breadcrumbs: PathItem[] } | null;
   hidden_selected_topics: { id: string; path: PathItem[]; visible_ancestor_id: string | null }[];
   sizing: { min_diameter_px: number; max_diameter_px: number; reference_count: number; revision: string; legend: string };
-  chat_totals: { message_count: number; missed_count: number; pending_analysis_count: number };
+  chat_totals: { message_count: number; missed_count: number; pending_analysis_count: number; filler_count: number };
+  /** Which map this is: the chat's own (null), or its map from one side's messages. */
+  side: 'mine' | 'others' | null;
+  /** How far this map's analysis has got. */
+  analysis: { pending_jobs: number; budget_paused: boolean; failed: boolean };
+  /** When ThreadMap last asked the phone for this chat's older messages. */
+  history_requested_at: string | null;
+  history_loading: boolean;
 }
 
 export interface ChatSummary {
@@ -119,4 +137,28 @@ export interface SourceMessage {
   topic_paths: { primary: boolean; path: PathItem[] }[];
   attachments: { id: string; media_type: string; mime: string | null; filename: string | null; size: number | null; availability: string; has_preview: boolean; description: string | null }[];
   context: { message_id: string; sender: string; direction: string; current: boolean; snippet: string | null; sent_at: string | null }[];
+  /** Every message of the discussion this one belongs to, in order (null before it is analysed). */
+  thread: {
+    title: string;
+    messages: {
+      message_id: string;
+      sender: string;
+      direction: string;
+      current: boolean;
+      filler: boolean;
+      snippet: string | null;
+      sent_at: string | null;
+      reply_to: { message_id: string; sender: string; snippet: string | null } | null;
+      /** The earlier message it answers without WhatsApp's Reply, as Nemotron read it. */
+      answers: { message_id: string; sender: string; snippet: string | null } | null;
+    }[];
+    /** Whether Nemotron has read the discussion for answers given without Reply. */
+    answers_checked: boolean;
+    before: { message_id: string; sender: string; direction: string; snippet: string | null; sent_at: string | null }[];
+  } | null;
+  /** The WhatsApp reply chain: what this replies to (oldest first) and every reply to it; depth = reply steps away. */
+  reply_chain: {
+    before: ChainMessage[];
+    after: ChainMessage[];
+  };
 }

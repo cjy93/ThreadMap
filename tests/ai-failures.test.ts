@@ -94,12 +94,13 @@ describe('provider failures', () => {
 });
 
 describe('budget-bounded recursive refinement', () => {
-  it('pauses with a persisted frontier, never flattens, and resumes under the same logical ledger', async () => {
+  it('pauses with a persisted frontier, never flattens, and resumes under the same refinement ledger', async () => {
     const { chats } = await freshWorkspace();
     const provider = new FixtureModelProvider(bundle.manifest);
-    // Tight per-job cap: initial taxonomy + one refinement call, then pause.
-    // Extraction runs as one call per microbatch so the cap only bounds refinement.
-    const cfg = { ...fixtureLlmConfig(), LLM_MAX_CALLS_PER_JOB: 2, LLM_EXTRACT_MAX_MESSAGES: 1000, LLM_MICROBATCH_MAX_MESSAGES: 1000, LLM_MAX_INPUT_TOKENS_PER_CALL: 200_000 };
+    // Tight per-job cap: each refinement the build starts gets one call, and the deeper
+    // refinements it asks for share that ledger, so they pause. (The build's own allowance
+    // grows with the chat's size.) Extraction runs as one call per microbatch.
+    const cfg = { ...fixtureLlmConfig(), LLM_MAX_CALLS_PER_JOB: 1, LLM_EXTRACT_MAX_MESSAGES: 1000, LLM_MICROBATCH_MAX_MESSAGES: 1000, LLM_MAX_INPUT_TOKENS_PER_CALL: 200_000 };
     await drainJobs({ db: t.db, provider, cfg, sleep: async () => undefined }, { chatIds: [chats.builders] });
     const paused = await t.db.select().from(s.taxonomyFrontiers).where(and(eq(s.taxonomyFrontiers.chatId, chats.builders), eq(s.taxonomyFrontiers.status, 'budget_paused')));
     expect(paused.length).toBeGreaterThan(0);
@@ -107,14 +108,14 @@ describe('budget-bounded recursive refinement', () => {
     expect(jobs.length).toBeGreaterThan(0);
     const ledgerId = paused[0].logicalJobId;
     const [ledger] = await t.db.select().from(s.budgetLedger).where(eq(s.budgetLedger.logicalJobId, ledgerId));
-    expect(ledger.callsUsed).toBe(2);
+    expect(ledger.callsUsed).toBe(1);
     const partial = await loadTree(t.db, chats.builders);
     expect(partial.maxDepth).toBeLessThan(6);
     // Resume: continuation shares the ledger; caps are NOT reset, so it pauses again until raised.
     await resumePausedFrontiers(t.db, chats.builders);
     await drainJobs({ db: t.db, provider, cfg, sleep: async () => undefined }, { chatIds: [chats.builders] });
     const [ledger2] = await t.db.select().from(s.budgetLedger).where(eq(s.budgetLedger.logicalJobId, ledgerId));
-    expect(ledger2.callsUsed).toBe(2);
+    expect(ledger2.callsUsed).toBe(1);
     // Owner raises the cap on the same ledger; refinement completes to full depth.
     await t.db.update(s.budgetLedger).set({ maxCalls: 100 }).where(eq(s.budgetLedger.logicalJobId, ledgerId));
     await resumePausedFrontiers(t.db, chats.builders);
@@ -122,7 +123,10 @@ describe('budget-bounded recursive refinement', () => {
     const full = await loadTree(t.db, chats.builders);
     expect(full.maxDepth).toBe(6);
     const refineJobs = await t.db.select().from(s.analysisJobs).where(and(eq(s.analysisJobs.chatId, chats.builders), eq(s.analysisJobs.kind, 'refine')));
-    expect(new Set(refineJobs.map((j) => j.logicalJobId))).toEqual(new Set([ledgerId]));
+    // Refinements never draw on a build's allowance; the paused one resumed on its own ledger.
+    const builds = new Set((await t.db.select().from(s.analysisJobs).where(and(eq(s.analysisJobs.chatId, chats.builders), eq(s.analysisJobs.kind, 'rebuild')))).map((j) => j.logicalJobId));
+    expect(refineJobs.filter((j) => builds.has(j.logicalJobId))).toEqual([]);
+    expect(refineJobs.some((j) => j.logicalJobId === ledgerId)).toBe(true);
   });
 });
 

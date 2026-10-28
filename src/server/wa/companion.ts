@@ -56,6 +56,9 @@ async function currentWaVersion(): Promise<WAVersion | undefined> {
   return waVersion?.version;
 }
 
+/** The kind of a WhatsApp address, for logs (never the address itself). */
+const jidKind = (jid: string | null | undefined) => (jid?.endsWith('@lid') ? 'hidden_id' : jid?.endsWith('@g.us') ? 'group' : jid ? 'phone' : 'none');
+
 const HANDLED_EVENTS = ['messaging-history.set', 'messages.upsert', 'messages.update', 'messages.delete', 'chats.upsert', 'chats.update', 'groups.upsert', 'groups.update', 'contacts.upsert', 'contacts.update', 'lid-mapping.update'] as const;
 
 class Session {
@@ -149,6 +152,9 @@ class Session {
         if (events['connection.update']) await this.onConnection(events['connection.update'], sock);
         if (events['creds.update']) await auth.saveCreds();
         const normalized: NormalizedEvent[] = [];
+        // Counts only (never content): whether WhatsApp answered a history request, and with what.
+        const hist = events['messaging-history.set'] as { syncType?: unknown; messages?: unknown[]; chats?: unknown[] } | undefined;
+        if (hist) log('history_received', { sync_type: String(hist.syncType ?? 'unknown'), messages: hist.messages?.length ?? 0, chats: hist.chats?.length ?? 0 });
         for (const name of HANDLED_EVENTS) {
           const data = events[name];
           if (data) normalized.push(...nativeToNormalized(name, data));
@@ -183,6 +189,10 @@ class Session {
 
   async ingest(events: NormalizedEvent[]) {
     const { stats, unselected } = await ingestEvents(this.db, this.ctx(), events);
+    // What became of history messages (stored, already there, or left out and why); counts only.
+    if (events.some((e) => e.type === 'message' && e.origin === 'history')) {
+      log('history_ingested', { inserted: stats.inserted, duplicates: stats.duplicates, unopened_chat: stats.excludedUnselected, before_cutoff: stats.excludedCutoff, over_cap: stats.excludedHistoryCap, ignored: stats.ignored });
+    }
     if (unselected.length) {
       // Only chats with no selection decision yet may be buffered (memory only).
       const undecided = await this.db.select({ jid: s.chats.nativeJid }).from(s.chats).where(and(eq(s.chats.linkedAccountId, this.accountId), eq(s.chats.selectionEpoch, 0)));
@@ -460,6 +470,7 @@ class Session {
       const nk = oldest.nativeKey as { remoteJid: string; participant?: string };
       const key: WAMessageKey = { remoteJid: nk.remoteJid, fromMe: oldest.fromMe, id: oldest.nativeId, participant: nk.participant ?? undefined };
       await this.sock.fetchMessageHistory(50, key, Math.floor(oldest.sentAt.getTime() / 1000));
+      log('history_requested', { from: 'oldest_stored', address: jidKind(key.remoteJid) });
       return { ok: true, from: 'oldest_stored' };
     }
     // Nothing stored yet (selected after the initial history was discarded): start from the newest message seen.
@@ -467,6 +478,7 @@ class Session {
     const a = chat?.anchor;
     if (!a) return { ok: false, reason: 'no anchor message' };
     await this.sock.fetchMessageHistory(50, { remoteJid: a.remoteJid, fromMe: a.fromMe, id: a.id, participant: a.participant ?? undefined }, a.ts);
+    log('history_requested', { from: 'newest_seen', address: jidKind(a.remoteJid) });
     return { ok: true, from: 'newest_seen' };
   }
 
