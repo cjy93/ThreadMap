@@ -30,12 +30,17 @@ export async function acquireLease(db: Db, url: string, linkedAccountId: string,
     await client.end();
     return null;
   }
-  const row = await db.execute<{ fencing_token: number }>(sql`
+  // Taking over locks the row FOR UPDATE, so it waits for writes still fenced by the previous
+  // owner (KEY SHARE, below). Plain renewals do not, so slow writes never delay a renewal.
+  const row = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT 1 FROM connector_leases WHERE linked_account_id = ${linkedAccountId}::uuid FOR UPDATE`);
+    return tx.execute<{ fencing_token: number }>(sql`
     INSERT INTO connector_leases (linked_account_id, owner_id, fencing_token, expires_at, heartbeat_at)
     VALUES (${linkedAccountId}::uuid, ${ownerId}, 1, now() + ${`${LEASE_TTL_MS} milliseconds`}::interval, now())
     ON CONFLICT (linked_account_id) DO UPDATE SET owner_id = EXCLUDED.owner_id,
       fencing_token = connector_leases.fencing_token + 1, expires_at = EXCLUDED.expires_at, heartbeat_at = now()
     RETURNING fencing_token`);
+  });
   const token = row.rows[0].fencing_token;
   let lostResolve!: () => void;
   const lost = new Promise<void>((res) => (lostResolve = res));
@@ -66,7 +71,7 @@ export async function acquireLease(db: Db, url: string, linkedAccountId: string,
     fence: async (tx: Tx) => {
       const ok = await tx.execute(sql`
         SELECT 1 FROM connector_leases WHERE linked_account_id = ${linkedAccountId}::uuid AND owner_id = ${ownerId}
-          AND fencing_token = ${token} AND expires_at > now() FOR SHARE`);
+          AND fencing_token = ${token} AND expires_at > now() FOR KEY SHARE`);
       if (!ok.rows.length || done) throw new LeaseLostError();
     },
     release: async () => {
