@@ -12,14 +12,17 @@ export type DbOrTx = Db | Tx;
 pg.types.setTypeParser(20, (v) => Number(v));
 
 /**
- * TLS settings for the Managed PostgreSQL private endpoint. In hosted mode the
- * CA must be supplied and certificates are always verified (hostname included).
+ * TLS settings for the database (Supabase, or a managed PostgreSQL). With a CA,
+ * certificates are always verified (hostname included). In hosted mode, or with
+ * DATABASE_REQUIRE_TLS=1 (e.g. a local app on Supabase, where hosted mode's
+ * HTTPS-only origin would not fit), a missing CA stops the process instead of
+ * silently connecting without verified TLS.
  */
 export function pgSslOptions(env: Env = process.env): pg.PoolConfig['ssl'] {
   const caPem = env.DATABASE_CA_CERT ?? (env.DATABASE_CA_CERT_FILE ? fs.readFileSync(env.DATABASE_CA_CERT_FILE, 'utf8') : undefined);
   if (caPem) return { ca: caPem, rejectUnauthorized: true };
-  if (env.APP_MODE === 'hosted') {
-    throw new Error('hosted mode requires DATABASE_CA_CERT or DATABASE_CA_CERT_FILE for verified TLS');
+  if (env.APP_MODE === 'hosted' || env.DATABASE_REQUIRE_TLS === '1') {
+    throw new Error('verified TLS is required: set DATABASE_CA_CERT or DATABASE_CA_CERT_FILE');
   }
   return undefined;
 }

@@ -17,9 +17,20 @@ messages. Recreating or updating containers keeps both volumes; deleting the Bre
 instance deletes them. **Disconnect and delete my data** in the app deletes the
 account's rows and files from them.
 
-Planned: the database moves to **Supabase**; once it has, "set up encryption" follows
-[`docs/threadmap/ENCRYPTION.md`](../../docs/threadmap/ENCRYPTION.md) (enforced, verified TLS
-to Supabase; Supabase encrypts at rest).
+**Moving ThreadMap onto a Brev instance:** step-by-step checklist in [`BREV.md`](BREV.md).
+
+**The database is on Supabase** (since 28 Oct 2026). On the instance, add
+`compose.supabase.yaml` to every command — it leaves the bundled database out and connects to
+Supabase with its certificate and hostname verified, refusing to start without the
+certificate:
+
+```
+docker compose --env-file .env.vm -f compose.yaml -f compose.supabase.yaml up -d --build
+```
+
+It needs `SUPABASE_DB_URL` in `.env.vm` (the Session pooler URI, port 5432) and Supabase's CA
+saved as `deploy/vm/supabase-ca.crt`. Details: [`docs/threadmap/ENCRYPTION.md`](../../docs/threadmap/ENCRYPTION.md).
+Run only one ThreadMap per WhatsApp account: stop the local one before starting this.
 
 ## 1. Create the instance
 

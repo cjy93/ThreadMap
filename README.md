@@ -104,7 +104,7 @@ On Windows, if Docker is installed only inside WSL, run these commands from a WS
 ## Security and encryption
 
 - **WhatsApp login** (credentials and Signal keys) is encrypted by ThreadMap itself (AES-256-GCM, `WHATSAPP_AUTH_ENCRYPTION_KEY`) before it reaches the database.
-- **Database:** on NVIDIA Brev it runs in a container on Docker's private network. The planned move is to **Supabase**: data encrypted at rest (AES-256) by Supabase, and enforced, certificate-verified TLS between ThreadMap and Supabase. The steps are in [`docs/threadmap/ENCRYPTION.md`](docs/threadmap/ENCRYPTION.md), run when the owner asks to **"set up encryption"** after the move. Message text itself is not encrypted by the app (by choice), so it stays searchable in the database.
+- **Database: Supabase** (since 28 Oct 2026; Tokyo, PostgreSQL 17). Supabase encrypts data at rest (AES-256); *Enforce SSL* is on, and ThreadMap verifies Supabase's certificate and hostname on every connection (`DATABASE_CA_CERT_FILE`), through the session pooler. Locally this is switched on by the git-ignored `compose.override.yaml` + `.env` (`SUPABASE_DB_URL`); delete the override to fall back to the local `db` container. Remaining steps are in [`docs/threadmap/ENCRYPTION.md`](docs/threadmap/ENCRYPTION.md) ("set up encryption"). Message text itself is not encrypted by the app (by choice), so it stays searchable in the database.
 - **Deletion:** *Disconnect and delete my data*, or no ThreadMap page open for 30 minutes, deletes the account with all its data and files.
 
 ## Honest limitations

@@ -22,6 +22,13 @@ search out of the database.
 
 ### 1. Supabase: refuse unencrypted connections
 
+> **Done 28 Oct 2026** (project `tczzpsmsbqgdslaisrwt`, Tokyo `ap-northeast-1`, PostgreSQL 17.6):
+> Enforce SSL switched on — verified: a connection with `sslmode=disable` is refused
+> (`ESSLREQUIRED`), and `sslmode=verify-full` with the downloaded CA succeeds through the
+> session pooler. The CA is at `deploy/vm/supabase-ca.crt` on the owner's machine (copy it
+> to the Brev instance). The connection string is kept in the git-ignored `.env.supabase`.
+> Dashboard path: **Database → Configuration → Settings → SSL configuration**.
+
 1. Supabase dashboard → project → **Database settings** → turn on **Enforce SSL on
    incoming connections**. This restarts the database (a few minutes of downtime).
    Docs: [Postgres SSL Enforcement](https://supabase.com/docs/guides/platform/ssl-enforcement).
@@ -30,6 +37,26 @@ search out of the database.
    (git-ignored, see step 2) — it is not secret, but it pins which server ThreadMap trusts.
 
 ### 2. ThreadMap: verify Supabase's certificate on every connection
+
+> **"Set up encryption" run on 28 Oct 2026:**
+> - Local app: `DATABASE_REQUIRE_TLS=1` in `compose.override.yaml` — like hosted mode, a
+>   missing certificate stops the app, but without hosted mode's HTTPS-only address (the local
+>   app runs on `http://localhost`). Takes effect with the next image rebuild.
+> - Checked live: a non-SSL connection is refused (`ESSLREQUIRED`); `verify-full` with a
+>   wrong CA (the public CA bundle) is refused (`certificate verify failed`); the right CA works.
+> - Supabase's session pooler allows **15 connections** (free plan); pools are capped
+>   (`DB_POOL_MAX=2`, `PGBOSS_POOL_MAX=2`, at most 12 in all) — before this the app could hit
+>   `EMAXCONNSESSION`.
+> - NVIDIA Brev: `deploy/vm/compose.supabase.yaml` (hosted mode, CA required, no bundled
+>   database), ready for when the instance is set up.
+>
+> **Migration, 28 Oct 2026:** the database was migrated (all 57 tables'
+> row counts matched) and the local ThreadMap runs on Supabase through
+> `compose.override.yaml` (git-ignored): all three connections use the session pooler with
+> `DATABASE_CA_CERT_FILE` (certificate + hostname verified), pools capped (see above). The URL is in the
+> git-ignored `.env` (`SUPABASE_DB_URL`). Still to do: `APP_MODE=hosted` (so a missing
+> certificate stops the app) — locally it stays `development`; and the same switch on the
+> NVIDIA Brev instance (`deploy/vm`).
 
 ThreadMap already verifies certificates when given a CA (`pgSslOptions` in
 `src/server/db.ts`: `rejectUnauthorized: true`, hostname checked; any `sslmode=…` in a URL

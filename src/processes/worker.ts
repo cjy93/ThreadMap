@@ -38,7 +38,8 @@ async function main() {
     log('provider_missing', { note: 'NEBIUS_API_KEY not configured; sources are captured and analysis stays pending' });
   }
 
-  const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, ssl: pgSslOptions(), max: 4, schema: 'pgboss' });
+  // The job queue's own connections; a hosted pooler may cap the whole app (Supabase free: 15).
+  const boss = new PgBoss({ connectionString: process.env.DATABASE_URL, ssl: pgSslOptions(), max: Number(process.env.PGBOSS_POOL_MAX ?? 4), schema: 'pgboss' });
   boss.on('error', (e) => log('boss_error', { error: e instanceof Error ? e.name : 'unknown' }));
   await boss.start();
   await boss.createQueue(QUEUE, { retryLimit: 2, retryBackoff: true, retryDelay: 10 }).catch(() => undefined);

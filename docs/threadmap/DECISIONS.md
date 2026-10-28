@@ -60,11 +60,12 @@ Recorded during implementation (25 Oct 2026). Each entry states the decision and
 - **Why a timeout, not "on close":** a browser cannot reliably report being closed — the unload signal also fires on reloads and navigation, and never fires on crashes, sleep or lost connections. Thirty minutes survives reloads and short drops.
 - **Trade-off:** capture no longer continues with the browser closed; reopening means scanning the QR again and rebuilding maps. `AUTO_DELETE_AFTER_MINUTES=0` turns it off (e.g. for development).
 
-## Database encryption (owner choice, 28 Oct 2026; planned)
+## Database on Supabase, encrypted connections (owner choice, 28 Oct 2026)
 
 - **Choice:** *connection + Supabase at-rest*. Once the database is on Supabase: Supabase's AES-256 at-rest encryption (always on), **Enforce SSL** switched on, and ThreadMap connecting with the Supabase CA (`DATABASE_CA_CERT_FILE`, `APP_MODE=hosted` so it refuses to start without one), certificate and hostname verified. Session pooler or direct connections only (the companion's advisory lock and LISTEN/NOTIFY break under transaction pooling).
 - **Not chosen:** app-side or per-user encryption of message text (it would move search out of the database). WhatsApp credentials stay app-encrypted (AES-256-GCM) as before.
-- **When:** the owner says "set up encryption" after the Supabase migration; runbook in `docs/threadmap/ENCRYPTION.md`.
+- **Migrated 28 Oct 2026:** `pg_dump --no-owner --no-privileges` of the local database restored into Supabase in one transaction over `sslmode=verify-full`; all 57 tables' row counts matched; the WhatsApp link moved with the data (no rescan). Locally switched over with a git-ignored `compose.override.yaml` (session pooler, CA file, `DB_POOL_MAX=3` because the free plan's pooler allows few connections); the local `db` container is kept as a fallback. Enforce SSL verified: a non-SSL connection is refused.
+- **Remaining** ("set up encryption"): `APP_MODE=hosted` and the same setup on the Brev instance; runbook in `docs/threadmap/ENCRYPTION.md`.
 
 ## UI theme
 

@@ -287,3 +287,19 @@ describe('opening branches beyond the node budget', () => {
     expect(opened.nodes.find((n) => n.id === cut.id)!.boundary).toBe(false);
   });
 });
+
+describe('database TLS', () => {
+  it('verifies the certificate when one is given, and refuses to run without one when required', async () => {
+    const { pgSslOptions } = await import('../src/server/db');
+    expect(pgSslOptions({ DATABASE_CA_CERT: '-----BEGIN CERTIFICATE-----x' })).toEqual({ ca: '-----BEGIN CERTIFICATE-----x', rejectUnauthorized: true });
+    expect(() => pgSslOptions({ DATABASE_REQUIRE_TLS: '1' })).toThrow(/verified TLS is required/);
+    expect(() => pgSslOptions({ APP_MODE: 'hosted' })).toThrow(/verified TLS is required/);
+    expect(pgSslOptions({})).toBeUndefined(); // local container on Docker's private network
+  });
+
+  it('passes the TLS, auto-delete and links settings to the processes that read them', async () => {
+    const { CHILDREN } = await import('../src/processes/supervisor');
+    const worker = CHILDREN.find((c) => c.name === 'worker')!;
+    expect(worker.allow).toEqual(expect.arrayContaining(['AUTO_DELETE_AFTER_MINUTES', 'CROSS_CHAT_LINKS']));
+  });
+});
