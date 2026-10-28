@@ -62,25 +62,6 @@ test('outline parity, keyboard access and an unobstructed map', async ({ page })
   await expect(page.getByRole('complementary', { name: 'Details' })).toContainText('matching messages');
 });
 
-test('combined filters and cross-chat related evidence', async ({ page }) => {
-  await openDemo(page);
-  await page.getByRole('button', { name: /Programming Study Group/ }).click();
-  await page.getByRole('button', { name: 'All', exact: true }).click();
-  await fit(page);
-  await nodeBody(page, 'Tokens').dispatchEvent('click');
-  await page.getByRole('tab', { name: 'Related chats' }).click();
-  await expect(page.locator('.msg').first()).toContainText('Builders and Hackathons');
-  await expect(page.locator('.msg').first()).toContainText('Evidence here');
-  await page.getByRole('button', { name: 'Filter to this topic' }).click();
-  await expect(page.locator('.pill', { hasText: 'Topic:' })).toBeVisible();
-  await page.getByRole('button', { name: 'Missed', exact: true }).click();
-  // Ancestor count equals the selected subtree's matching count once the new filter's response lands.
-  await expect
-    .poll(async () => [await nodeBody(page, 'Knowledge').textContent(), await nodeBody(page, 'Tokens').textContent()])
-    .toEqual([expect.any(String), expect.any(String)]);
-  await expect.poll(async () => (await nodeBody(page, 'Knowledge').textContent()) === (await nodeBody(page, 'Tokens').textContent())).toBe(true);
-});
-
 test('reduced motion disables transitions', async ({ browser }) => {
   const ctx = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await ctx.newPage();

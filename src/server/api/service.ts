@@ -9,6 +9,7 @@ import type { Db, DbOrTx } from '../db';
 import { nodeContent } from '../graph/content';
 import { chatTotals, computeCounts } from '../graph/counts';
 import { filterFingerprint, matchingMessagesSql, parseContentFilter, parseDisplayDepth, type ContentFilter, type DisplayDepth } from '../graph/filters';
+import { sideMapOf, sideSql, type MapSide } from '../ai/pipeline';
 import { projectMap } from '../graph/projection';
 import { correctPlacement, editTopic, loadTree, pathOf } from '../graph/tree';
 import { createBulkSnapshot, executeBulk, setReview } from '../review';
@@ -30,6 +31,15 @@ export async function requireChat(db: DbOrTx, ctx: AuthCtx, chatId: string) {
   return c;
 }
 
+/**
+ * Paused or failed steps count only for the current build: once a later build of
+ * the map has completed, an older stalled step (e.g. a refinement that used up its
+ * own call cap) no longer says anything about the map, so it does not show as
+ * "paused by budget" or "failed". Waiting and running steps always count.
+ */
+const currentBuildOnly = sql`(j.status IN ('pending','running') OR j.created_at > COALESCE(
+  (SELECT max(b.completed_at) FROM analysis_jobs b WHERE b.chat_id = j.chat_id AND b.kind = 'rebuild' AND b.status = 'completed'), 'epoch'::timestamptz))`;
+
 /** Indexed chats with selection state, overall distinct counts and pending analysis. */
 export async function listChats(db: Db, ctx: AuthCtx) {
   const chats = await db.select().from(s.chats).where(and(eq(s.chats.workspaceId, ctx.workspaceId), eq(s.chats.excluded, false))).orderBy(s.chats.title);
@@ -37,9 +47,10 @@ export async function listChats(db: Db, ctx: AuthCtx) {
   const totals = await chatTotals(db, ctx.userId, ctx.workspaceId, indexed.map((c) => c.id));
   const jobs = indexed.length
     ? await db.execute<{ chat_id: string; status: string; n: number }>(sql`
-        SELECT chat_id, status, count(*)::int AS n FROM analysis_jobs
-        WHERE chat_id IN (${sql.join(indexed.map((c) => sql`${c.id}::uuid`), sql`, `)}) AND status IN ('pending','running','budget_paused','failed')
-        GROUP BY chat_id, status`)
+        SELECT j.chat_id, j.status, count(*)::int AS n FROM analysis_jobs j
+        WHERE j.chat_id IN (${sql.join(indexed.map((c) => sql`${c.id}::uuid`), sql`, `)}) AND j.status IN ('pending','running','budget_paused','failed')
+          AND ${currentBuildOnly}
+        GROUP BY j.chat_id, j.status`)
     : { rows: [] };
   return indexed.map((c) => {
     const t = totals.get(c.id) ?? { total: 0, missed: 0, pending: 0 };
@@ -82,8 +93,32 @@ const idList = (v: string | null) =>
     .filter(isUuid)
     .slice(0, 500);
 
+/**
+ * Which map to show: the chat's own, or with ?side=mine|others its one-sided
+ * map ("Map from: You / Others"), which must have been started first.
+ */
+async function mapFor(db: DbOrTx, chatId: string, params: URLSearchParams): Promise<{ mapId: string; side: MapSide | null }> {
+  const side = params.get('side');
+  if (side !== 'mine' && side !== 'others') return { mapId: chatId, side: null };
+  const map = await sideMapOf(db, chatId, side);
+  if (!map) throw new SafeError('this map has not been started yet', 409, 'side_map_missing');
+  return { mapId: map.id, side };
+}
+
+/** Analysis state of one map (a chat's own, or one of its one-sided maps). */
+async function mapAnalysis(db: DbOrTx, mapId: string) {
+  const js = (await db.execute<{ status: string; n: number }>(sql`
+    SELECT j.status, count(*)::int AS n FROM analysis_jobs j WHERE j.chat_id = ${mapId}::uuid AND j.status IN ('pending','running','budget_paused','failed') AND ${currentBuildOnly} GROUP BY j.status`)).rows;
+  return {
+    pending_jobs: js.filter((j) => j.status === 'pending' || j.status === 'running').reduce((n, j) => n + j.n, 0),
+    budget_paused: js.some((j) => j.status === 'budget_paused'),
+    failed: js.some((j) => j.status === 'failed'),
+  };
+}
+
 export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSearchParams) {
   const chat = await requireChat(db, ctx, chatId);
+  const { mapId, side } = await mapFor(db, chat.id, params);
   const cfg = view();
   const filter = parseContentFilter(params, { tz: cfg.defaultTimezone });
   const urlDepth = parseDisplayDepth(params.get('max_topic_depth'));
@@ -98,10 +133,10 @@ export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSe
   // One consistent snapshot for tree, counts and versions.
   return db.transaction(
     async (tx) => {
-      const tree = await loadTree(tx, chatId);
-      const counts = await computeCounts(tx, { userId: ctx.userId, workspaceId: ctx.workspaceId, chatId }, filter);
-      const discussions = await tx.select({ id: s.discussions.id, topicId: s.discussions.topicId, title: s.discussions.title }).from(s.discussions).where(eq(s.discussions.chatId, chatId));
-      const [g] = await tx.select({ g: s.chats.graphVersion }).from(s.chats).where(eq(s.chats.id, chatId));
+      const tree = await loadTree(tx, mapId);
+      const counts = await computeCounts(tx, { userId: ctx.userId, workspaceId: ctx.workspaceId, chatId: mapId, messageChatId: chatId }, filter);
+      const discussions = await tx.select({ id: s.discussions.id, topicId: s.discussions.topicId, title: s.discussions.title }).from(s.discussions).where(eq(s.discussions.chatId, mapId));
+      const [g] = await tx.select({ g: s.chats.graphVersion }).from(s.chats).where(eq(s.chats.id, mapId));
       const filterActive = filter.status !== 'all' || Boolean(filter.from || filter.to) || filter.topicIds.length > 0;
       const projection = projectMap({
         tree,
@@ -111,12 +146,29 @@ export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSe
         collapsed,
         focusId: isUuid(focus) && tree.nodes.has(focus) ? focus : null,
         childOffsets: offsets,
-        showDiscussions: params.get('discussions') === '1',
+        expandIds: idList(params.get('expand')),
         selectedTopicIds: filter.topicIds,
         filterActive,
         view: cfg,
       });
-      const totals = (await chatTotals(tx, ctx.userId, ctx.workspaceId, [chatId])).get(chatId) ?? { total: 0, missed: 0, pending: 0 };
+      // A one-sided map counts only that side's messages, and "pending" means not yet on that map.
+      const totals = side
+        ? (
+            await tx.execute<{ total: number; missed: number; pending: number }>(sql`
+              SELECT count(*)::int AS total,
+                count(*) FILTER (WHERE NOT COALESCE(rs.status = 'read' AND rs.reviewed_revision = m.content_revision, false))::int AS missed,
+                count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM placements p WHERE p.message_id = m.id AND p.chat_id = ${mapId}::uuid))::int AS pending
+              FROM messages m LEFT JOIN review_state rs ON rs.user_id = ${ctx.userId} AND rs.message_id = m.id
+              WHERE m.chat_id = ${chatId}::uuid AND ${sideSql(side)} AND m.kind IN ('text','media') AND m.state = 'active' AND (m.expires_at IS NULL OR m.expires_at > now())`)
+          ).rows[0]
+        : ((await chatTotals(tx, ctx.userId, ctx.workspaceId, [chatId])).get(chatId) ?? { total: 0, missed: 0, pending: 0 });
+      // Small talk left off the map, so its counts can add up to less than the chat's.
+      const [fill] = (await tx.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM messages WHERE chat_id = ${chatId}::uuid AND filler`)).rows;
+      // When ThreadMap last asked the phone for this chat's older messages, so an empty or
+      // short chat can say why instead of just showing zeros.
+      const [hist] = (
+        await tx.execute<{ at: Date | null; loading: boolean }>(sql`SELECT max(created_at) AS at, COALESCE(max(created_at) > now() - interval '3 minutes', false) AS loading FROM connector_commands WHERE workspace_id = ${ctx.workspaceId}::uuid AND type = 'request_history' AND payload->>'chatId' = ${chatId}`)
+      ).rows;
       return {
         chat: { id: chat.id, title: chat.title, kind: chat.kind, source: chat.sourceKind },
         graph_version: g.g,
@@ -127,7 +179,13 @@ export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSe
         ...projection,
         // Logical (unzoomed) diameters derived from server counts with the shared scale.
         nodes: projection.nodes.map((n) => ({ ...n, diameter: nodeDiameter(n.matching_message_count, cfg.sizing) })),
-        chat_totals: { message_count: totals.total, missed_count: totals.missed, pending_analysis_count: totals.pending },
+        chat_totals: { message_count: totals.total, missed_count: totals.missed, pending_analysis_count: totals.pending, filler_count: fill.n },
+        history_requested_at: hist?.at ? new Date(hist.at).toISOString() : null,
+        // Asked within the last few minutes: the phone's answer may still be on its way.
+        history_loading: Boolean(hist?.loading),
+        // Which map this is, and how far its analysis has got.
+        side,
+        analysis: await mapAnalysis(tx, mapId),
       };
     },
     { isolationLevel: 'repeatable read', accessMode: 'read only' },
@@ -136,6 +194,7 @@ export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSe
 
 export async function getNodeContent(db: Db, ctx: AuthCtx, chatId: string, nodeId: string, params: URLSearchParams) {
   await requireChat(db, ctx, chatId);
+  const { mapId } = await mapFor(db, chatId, params);
   if (!isUuid(nodeId)) throw new SafeError('node not found', 404, 'not_found');
   const cfg = view();
   const filter = parseContentFilter(params, { tz: cfg.defaultTimezone });
@@ -143,12 +202,12 @@ export async function getNodeContent(db: Db, ctx: AuthCtx, chatId: string, nodeI
   const pageSize = Math.min(Math.max(Number(params.get('page_size') ?? cfg.contentPageSize) || cfg.contentPageSize, 1), 200);
   return db.transaction(
     async (tx) => {
-      const tree = await loadTree(tx, chatId);
-      const [g] = await tx.select({ g: s.chats.graphVersion }).from(s.chats).where(eq(s.chats.id, chatId));
-      const res = await nodeContent(tx, { userId: ctx.userId, workspaceId: ctx.workspaceId, chatId }, tree, g.g, filter, { nodeId, tab, cursor: params.get('cursor'), pageSize });
+      const tree = await loadTree(tx, mapId);
+      const [g] = await tx.select({ g: s.chats.graphVersion }).from(s.chats).where(eq(s.chats.id, mapId));
+      const res = await nodeContent(tx, { userId: ctx.userId, workspaceId: ctx.workspaceId, chatId: mapId, messageChatId: chatId }, tree, g.g, filter, { nodeId, tab, cursor: params.get('cursor'), pageSize });
       // A topic's summary covers every discussion beneath it: grouping and refinement leave parents with none of their own.
       const under = (id: string): string[] => [id, ...(tree.nodes.get(id)?.childIds ?? []).flatMap(under)];
-      const summary = await nodeSummary(tx, chatId, nodeId, tree.nodes.has(nodeId) ? under(nodeId) : [], filter, params.get('full_summary') === '1');
+      const summary = await nodeSummary(tx, mapId, nodeId, tree.nodes.has(nodeId) ? under(nodeId) : [], filter, params.get('full_summary') === '1');
       return { ...res, summary };
     },
     { isolationLevel: 'repeatable read', accessMode: 'read only' },
@@ -181,6 +240,55 @@ async function nodeSummary(db: DbOrTx, chatId: string, nodeId: string, topicIds:
   return { coverage: 'full_topic', available, claims: claims.rows, note: null };
 }
 
+/**
+ * The whole discussion a message belongs to, in order, filler included: its
+ * unit, plus units of the same title placed in the same topic (one conversation
+ * read in several batches). Empty before the message is analysed.
+ */
+export async function discussionRows(db: DbOrTx, chatId: string, messageId: string) {
+  return (
+    await db.execute<{
+      id: string;
+      sender_label: string;
+      body: string | null;
+      sent_at: Date | null;
+      state: string;
+      direction: string;
+      filler: boolean | null;
+      title: string;
+      reply_to: string | null;
+      native_id: string;
+      inferred_reply_to: string | null;
+      inferred_at: Date | null;
+    }>(sql`
+      WITH mine AS (
+        SELECT u.summary_bullets->>'title' AS title, u.assigned_topic_id FROM analysis_units u
+        WHERE u.chat_id = ${chatId}::uuid AND u.message_refs @> jsonb_build_array(jsonb_build_object('m', ${messageId}::text))
+        ORDER BY u.created_at DESC LIMIT 1
+      ), units AS (
+        SELECT u.message_refs FROM analysis_units u, mine
+        WHERE u.chat_id = ${chatId}::uuid
+          AND (u.message_refs @> jsonb_build_array(jsonb_build_object('m', ${messageId}::text))
+            OR (mine.assigned_topic_id IS NOT NULL AND u.assigned_topic_id = mine.assigned_topic_id AND lower(u.summary_bullets->>'title') = lower(mine.title)))
+      )
+      SELECT DISTINCT ON (x.sent_at, x.id) x.id, x.sender_label, x.body, x.sent_at, x.state, x.direction, x.filler, (SELECT title FROM mine) AS title,
+        x.reply_to_native_id AS reply_to, x.native_id, x.inferred_reply_to, x.inferred_at
+      FROM units, jsonb_array_elements(units.message_refs) r JOIN messages x ON x.id = (r->>'m')::uuid
+      WHERE x.chat_id = ${chatId}::uuid
+      ORDER BY x.sent_at NULLS LAST, x.id
+      LIMIT ${THREAD_MAX_MESSAGES}`)
+  ).rows;
+}
+
+// A long discussion's thread is cut here; the rest stays reachable from the map.
+const THREAD_MAX_MESSAGES = 400;
+// Messages shown before a discussion starts, so a reply's lead-up is visible.
+const THREAD_BEFORE_MESSAGES = 6;
+// Chatroom: messages shown each side of an opened message, and per page when scrolling further.
+const CHATROOM_PAGE = 15;
+// Reply steps followed up and down a WhatsApp reply chain.
+const REPLY_CHAIN_MAX = 20;
+
 export async function getMessage(db: Db, ctx: AuthCtx, messageId: string) {
   if (!isUuid(messageId)) throw new SafeError('message not found', 404, 'not_found');
   const [m] = await db.select().from(s.messages).where(and(eq(s.messages.id, messageId), eq(s.messages.workspaceId, ctx.workspaceId)));
@@ -192,10 +300,74 @@ export async function getMessage(db: Db, ctx: AuthCtx, messageId: string) {
   const [rs] = await db.select().from(s.reviewState).where(and(eq(s.reviewState.userId, ctx.userId), eq(s.reviewState.messageId, m.id)));
   const ctxRows = m.sentAt
     ? await db.execute<{ id: string; sender_label: string; body: string | null; sent_at: Date | null; kind: string; state: string; direction: string }>(sql`
-        (SELECT id, sender_label, body, sent_at, kind, state, direction FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) < (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at DESC, id DESC LIMIT 5)
+        (SELECT id, sender_label, body, sent_at, kind, state, direction FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) < (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at DESC, id DESC LIMIT ${CHATROOM_PAGE})
         UNION ALL
-        (SELECT id, sender_label, body, sent_at, kind, state, direction FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) > (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at, id LIMIT 5)`)
+        (SELECT id, sender_label, body, sent_at, kind, state, direction FROM messages WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) > (${m.sentAt}, ${m.id}::uuid) ORDER BY sent_at, id LIMIT ${CHATROOM_PAGE})`)
     : { rows: [] };
+  const threadRows = await discussionRows(db, m.chatId, m.id);
+  // What led up to the discussion (a reply is meaningless without it): the messages just before
+  // its first one, whatever discussion they belong to, and every message a thread message quotes.
+  type Near = { id: string; sender_label: string; body: string | null; sent_at: Date | null; state: string; direction: string; native_id: string };
+  const first = threadRows.find((r) => r.sent_at);
+  const beforeRows = first
+    ? (
+        await db.execute<Near>(sql`
+          SELECT id, sender_label, body, sent_at, state, direction, native_id FROM messages
+          WHERE chat_id = ${m.chatId}::uuid AND (sent_at, id) < (${first.sent_at}, ${first.id}::uuid) ORDER BY sent_at DESC, id DESC LIMIT ${THREAD_BEFORE_MESSAGES}`)
+      ).rows.reverse()
+    : [];
+  const quotedNatives = [...new Set(threadRows.map((r) => r.reply_to).filter((x): x is string => !!x))];
+  const quoted = quotedNatives.length
+    ? new Map(
+        (
+          await db.execute<Near>(sql`
+            SELECT id, sender_label, body, sent_at, state, direction, native_id FROM messages
+            WHERE chat_id = ${m.chatId}::uuid AND native_id IN (${sql.join(quotedNatives.map((n) => sql`${n}`), sql`, `)})`)
+        ).rows.map((q) => [q.native_id, q]),
+      )
+    : new Map<string, Near>();
+  // Answers Nemotron found where no WhatsApp reply was used.
+  const answeredIds = [...new Set(threadRows.map((r) => r.inferred_reply_to).filter((x): x is string => !!x))];
+  const answered = answeredIds.length
+    ? new Map(
+        (
+          await db.execute<Near>(sql`
+            SELECT id, sender_label, body, sent_at, state, direction, native_id FROM messages
+            WHERE chat_id = ${m.chatId}::uuid AND id IN (${sql.join(answeredIds.map((id) => sql`${id}::uuid`), sql`, `)})`)
+        ).rows.map((q) => [q.id, q]),
+      )
+    : new Map<string, Near>();
+  // The reply chain: what this message replies to (and what that replies to), and every reply to
+  // it (and replies to those), wherever they sit in the chat. A step is a WhatsApp reply, or else
+  // an answer Nemotron found (marked inferred).
+  type Chained = Near & { reply_to_native_id: string | null; inferred_reply_to: string | null; depth: number; inferred: boolean };
+  const above: Chained[] = [];
+  let up: { native: string | null; id: string | null } = { native: m.replyToNativeId, id: m.inferredReplyTo };
+  for (let depth = 1; (up.native || up.id) && depth <= REPLY_CHAIN_MAX; depth++) {
+    const inferred = !up.native;
+    const [q] = (
+      await db.execute<Chained>(sql`
+        SELECT id, sender_label, body, sent_at, state, direction, native_id, reply_to_native_id, inferred_reply_to, ${depth}::int AS depth, ${inferred}::boolean AS inferred FROM messages
+        WHERE chat_id = ${m.chatId}::uuid AND ${up.native ? sql`native_id = ${up.native}` : sql`id = ${up.id}::uuid`} ORDER BY sent_at NULLS LAST LIMIT 1`)
+    ).rows;
+    if (!q || q.id === m.id || above.some((a) => a.id === q.id)) break;
+    above.push(q);
+    up = { native: q.reply_to_native_id, id: q.inferred_reply_to };
+  }
+  const below = (
+    await db.execute<Chained>(sql`
+      WITH RECURSIVE d AS (
+        SELECT id, native_id, 1 AS depth, (reply_to_native_id IS DISTINCT FROM ${m.nativeId}) AS inferred FROM messages
+        WHERE chat_id = ${m.chatId}::uuid AND (reply_to_native_id = ${m.nativeId} OR inferred_reply_to = ${m.id}::uuid) AND id <> ${m.id}::uuid
+        UNION
+        SELECT x.id, x.native_id, d.depth + 1, (x.reply_to_native_id IS DISTINCT FROM d.native_id) FROM messages x
+        JOIN d ON x.reply_to_native_id = d.native_id OR x.inferred_reply_to = d.id
+        WHERE x.chat_id = ${m.chatId}::uuid AND x.id <> ${m.id}::uuid AND d.depth < ${REPLY_CHAIN_MAX}
+      )
+      SELECT x.id, x.sender_label, x.body, x.sent_at, x.state, x.direction, x.native_id, x.reply_to_native_id, x.inferred_reply_to, min(d.depth)::int AS depth, bool_and(d.inferred) AS inferred
+      FROM d JOIN messages x ON x.id = d.id
+      GROUP BY x.id ORDER BY x.sent_at NULLS LAST, x.id LIMIT ${REPLY_CHAIN_MAX * 10}`)
+  ).rows;
   const isRead = rs?.status === 'read' && rs.reviewedRevision === m.contentRevision;
   const tombstoned = m.state !== 'active';
   // In a one-to-one chat the other side is the chat itself, even when WhatsApp sent no name.
@@ -243,7 +415,87 @@ export async function getMessage(db: Db, ctx: AuthCtx, messageId: string) {
         snippet: c.state === 'active' ? (c.body ?? '').slice(0, 500) : null,
         sent_at: c.sent_at ? new Date(c.sent_at).toISOString() : null,
       })),
+    // Every message of its discussion in order, filler and your own messages included.
+    thread: threadRows.length
+      ? {
+          title: threadRows[0].title,
+          messages: threadRows.map((c) => ({
+            message_id: c.id,
+            sender: senderOf(c.sender_label, c.direction),
+            direction: c.direction,
+            current: c.id === m.id,
+            filler: c.filler === true,
+            snippet: c.state === 'active' ? (c.body ?? '').slice(0, 500) : null,
+            sent_at: c.sent_at ? new Date(c.sent_at).toISOString() : null,
+            // The message this one quotes (WhatsApp "reply"), wherever it sits.
+            reply_to: (() => {
+              const q = c.reply_to ? quoted.get(c.reply_to) : undefined;
+              return q ? { message_id: q.id, sender: senderOf(q.sender_label, q.direction), snippet: q.state === 'active' ? (q.body ?? '').slice(0, 200) : null } : null;
+            })(),
+            // The earlier message it answers without a WhatsApp reply, as Nemotron read it.
+            answers: (() => {
+              const q = !c.reply_to && c.inferred_reply_to ? answered.get(c.inferred_reply_to) : undefined;
+              return q ? { message_id: q.id, sender: senderOf(q.sender_label, q.direction), snippet: q.state === 'active' ? (q.body ?? '').slice(0, 200) : null } : null;
+            })(),
+          })),
+          // Whether Nemotron has read this discussion for answers given without a WhatsApp reply.
+          answers_checked: threadRows.every((r) => r.inferred_at !== null),
+          // The messages just before the discussion starts, for context.
+          before: beforeRows.map((c) => ({
+            message_id: c.id,
+            sender: senderOf(c.sender_label, c.direction),
+            direction: c.direction,
+            snippet: c.state === 'active' ? (c.body ?? '').slice(0, 300) : null,
+            sent_at: c.sent_at ? new Date(c.sent_at).toISOString() : null,
+          })),
+        }
+      : null,
+    // The reply chain: replied-to messages (oldest first) and replies (in time order), each with
+    // how many reply steps away from this message it is.
+    reply_chain: (() => {
+      const item = (c: Chained) => ({
+        message_id: c.id,
+        sender: senderOf(c.sender_label, c.direction),
+        direction: c.direction,
+        snippet: c.state === 'active' ? (c.body ?? '').slice(0, 500) : null,
+        sent_at: c.sent_at ? new Date(c.sent_at).toISOString() : null,
+        depth: c.depth,
+        inferred: c.inferred,
+      });
+      return { before: [...above].reverse().map(item), after: below.map(item) };
+    })(),
     route: `/chats/${m.chatId}/messages/${m.id}`,
+  };
+}
+
+/**
+ * Chatroom: the chat in time order, as in WhatsApp, a page at a time before or
+ * after a message (`from`, exclusive), for scrolling further from an opened message.
+ */
+export async function chatroomPage(db: Db, ctx: AuthCtx, messageId: string, dir: string | null) {
+  if (!isUuid(messageId)) throw new SafeError('message not found', 404, 'not_found');
+  const [m] = await db.select().from(s.messages).where(and(eq(s.messages.id, messageId), eq(s.messages.workspaceId, ctx.workspaceId)));
+  if (!m?.sentAt) throw new SafeError('message not found', 404, 'not_found');
+  const chat = await requireChat(db, ctx, m.chatId);
+  const before = dir === 'before';
+  const rows = (
+    await db.execute<{ id: string; sender_label: string; body: string | null; sent_at: Date | null; state: string; direction: string }>(sql`
+      SELECT id, sender_label, body, sent_at, state, direction FROM messages
+      WHERE chat_id = ${m.chatId}::uuid AND ${before ? sql`(sent_at, id) < (${m.sentAt}, ${m.id}::uuid)` : sql`(sent_at, id) > (${m.sentAt}, ${m.id}::uuid)`}
+      ORDER BY ${before ? sql`sent_at DESC, id DESC` : sql`sent_at, id`} LIMIT ${CHATROOM_PAGE}`)
+  ).rows;
+  if (before) rows.reverse();
+  const senderOf = (label: string, direction: string) => (label === 'Unknown sender' && chat.kind === 'direct' && direction === 'incoming' ? chat.title : label);
+  return {
+    messages: rows.map((c) => ({
+      message_id: c.id,
+      sender: senderOf(c.sender_label, c.direction),
+      direction: c.direction,
+      current: false,
+      snippet: c.state === 'active' ? (c.body ?? '').slice(0, 500) : null,
+      sent_at: c.sent_at ? new Date(c.sent_at).toISOString() : null,
+    })),
+    more: rows.length === CHATROOM_PAGE,
   };
 }
 
@@ -287,7 +539,8 @@ export async function bulkPreview(db: Db, ctx: AuthCtx, chatId: string, body: un
   const b = (body ?? {}) as { node_id?: unknown; filter?: Record<string, string> };
   const filter = parseContentFilter(new URLSearchParams(b.filter ?? {}), { tz: view().defaultTimezone });
   const nodeId = isUuid(b.node_id) ? b.node_id : null;
-  return createBulkSnapshot(db, ctx, chatId, nodeId, filter);
+  const { mapId } = await mapFor(db, chatId, new URLSearchParams(b.filter ?? {}));
+  return createBulkSnapshot(db, ctx, chatId, nodeId, filter, mapId);
 }
 
 export async function bulkExecute(db: Db, ctx: AuthCtx, body: unknown) {

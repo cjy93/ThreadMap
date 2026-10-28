@@ -215,10 +215,14 @@ export function ConnectPanel({
     <div className="card" style={{ maxWidth: 720, margin: '16px auto' }}>
       <h2 style={{ marginTop: 0 }}>Connect WhatsApp</h2>
       <p className="counts">
-        ThreadMap runs a linked-device session in its cloud deployment (Nebius). Chats you open are stored in the deployment&apos;s database and their text is sent to
+        ThreadMap runs a linked-device session in its cloud deployment (NVIDIA Brev). Chats you open are stored in the deployment&apos;s database and their text is sent to
         Nebius Token Factory (NVIDIA Nemotron) for analysis. This uses Baileys, an unofficial WhatsApp Web library — an experimental integration that WhatsApp could restrict.
         Messages of chats you have not opened are held only briefly in memory (≤32 MiB, ≤5 min), then discarded; only their name, type, last-message time and the small
         profile photo of chats you scroll past are kept so this list can show them. ThreadMap never sends messages or read receipts.
+      </p>
+      <p className="counts">
+        <strong>Leaving deletes your data.</strong> If no ThreadMap page is open for 30 minutes, ThreadMap unlinks itself from your phone and deletes your chats, messages,
+        maps and photos, just like <em>Disconnect and delete my data</em>. Keep a ThreadMap tab open while you want it to keep capturing.
       </p>
 
       <section>
@@ -354,7 +358,6 @@ export function ConnectPanel({
                           <div>
                             {ch.title} {ch.selected ? <span className="pill">Opened</span> : null}
                             {/* The number helps tell people apart; never shown where WhatsApp masked it. */}
-                            {ch.phone && ch.phone !== ch.title && !/[∙•·]/.test(ch.title) ? <div className="counts">{ch.phone}</div> : null}
                           </div>
                         </div>
                       </td>

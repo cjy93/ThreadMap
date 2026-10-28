@@ -10,7 +10,10 @@ import { descendantIds, pathOf, type Tree } from './tree';
 export interface ContentScope {
   userId: string;
   workspaceId: string;
+  /** The map: its topics, discussions and placements. */
   chatId: string;
+  /** The chat whose messages are listed, when the map is a one-sided map of it. */
+  messageChatId?: string;
 }
 
 interface Cursor {
@@ -45,7 +48,7 @@ export interface ContentRequest {
 }
 
 export async function nodeContent(db: DbOrTx, scope: ContentScope, tree: Tree, graphVersion: number, filter: ContentFilter, req: ContentRequest) {
-  const fp = filterFingerprint({ userId: scope.userId, workspaceId: scope.workspaceId, chatIds: [scope.chatId] }, filter);
+  const fp = filterFingerprint({ userId: scope.userId, workspaceId: scope.workspaceId, chatIds: [scope.messageChatId ?? scope.chatId] }, filter);
   let topicIds: string[] | null = null;
   let discussionId: string | null = null;
   let nodePath: { id: string; title: string; depth: number }[];
@@ -69,7 +72,7 @@ export async function nodeContent(db: DbOrTx, scope: ContentScope, tree: Tree, g
     after = c.k;
   }
 
-  const matching = matchingMessagesSql({ userId: scope.userId, workspaceId: scope.workspaceId, chatIds: [scope.chatId] }, filter);
+  const matching = matchingMessagesSql({ userId: scope.userId, workspaceId: scope.workspaceId, chatIds: [scope.messageChatId ?? scope.chatId] }, filter);
   const membership = topicIds
     ? sql`SELECT DISTINCT p.message_id FROM placements p WHERE p.chat_id = ${scope.chatId}::uuid AND p.topic_id IN (${sql.join(
         topicIds.map((t) => sql`${t}::uuid`),
@@ -128,7 +131,7 @@ export async function nodeContent(db: DbOrTx, scope: ContentScope, tree: Tree, g
       attachment_count: r.attachment_count,
       // Actual topic paths for every placement (deduplicated message, many paths).
       topic_paths: r.topic_ids.filter((t) => tree.nodes.has(t)).map((t) => pathOf(tree, t)),
-      route: `/chats/${scope.chatId}/messages/${r.id}`,
+      route: `/chats/${scope.messageChatId ?? scope.chatId}/messages/${r.id}`,
     }));
     const last = rows.rows.length > req.pageSize ? rows.rows[req.pageSize - 1] : null;
     return {
@@ -188,7 +191,7 @@ export async function nodeContent(db: DbOrTx, scope: ContentScope, tree: Tree, g
     sent_at: r.sent_at ? new Date(r.sent_at).toISOString() : null,
     sender: r.sender_label,
     topic_paths: r.topic_ids.filter((t) => tree.nodes.has(t)).map((t) => pathOf(tree, t)),
-    route: `/chats/${scope.chatId}/messages/${r.message_id}`,
+    route: `/chats/${scope.messageChatId ?? scope.chatId}/messages/${r.message_id}`,
   }));
   const lastRow = rows.rows.length > req.pageSize ? rows.rows[cut - 1] : null;
   const next = lastRow

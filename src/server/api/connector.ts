@@ -4,7 +4,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import * as s from '../../db/schema';
 import { loadAppConfig } from '../../lib/config';
-import { mapNeedsTidy, rebuildMapFromScratch, requestRebuild, resumePausedFrontiers } from '../ai/pipeline';
+import { analyseSide, mapNeedsTidy, rebuildMapFromScratch, requestRebuild, resumePausedFrontiers, type MapSide } from '../ai/pipeline';
 import type { Db } from '../db';
 import { notifyChange } from '../notify';
 import { getStorage } from '../storage';
@@ -180,8 +180,17 @@ export async function requestAvatars(db: Db, ctx: AuthCtx, body: unknown) {
 
 export async function avatarContent(db: Db, ctx: AuthCtx, chatId: string) {
   ownerOnly(ctx);
-  const chat = await requireChat(db, ctx, chatId);
+  if (!isUuid(chatId)) throw new SafeError('chat not found', 404, 'not_found');
+  // Unopened chats keep their photo too (the chat picker shows it), so no "opened" check here.
+  const [chat] = await db.select({ id: s.chats.id, avatarKey: s.chats.avatarKey }).from(s.chats).where(and(eq(s.chats.id, chatId), eq(s.chats.workspaceId, ctx.workspaceId)));
+  if (!chat) throw new SafeError('chat not found', 404, 'not_found');
   const bytes = chat.avatarKey ? await getStorage().get(chat.avatarKey) : null;
+  if (chat.avatarKey && !bytes) {
+    // The stored copy is gone (e.g. the container's files were reset): look the photo up again.
+    await db.update(s.chats).set({ avatarKey: null, avatarCheckedAt: null }).where(eq(s.chats.id, chat.id));
+    // Open pages reload the chat list, see the photo is due, and ask WhatsApp for it again.
+    await notifyChange(db, { ws: ctx.workspaceId, kind: 'chats' });
+  }
   if (!bytes) throw new SafeError('no profile photo', 404, 'not_found');
   return new Response(new Uint8Array(bytes), {
     headers: {
@@ -231,13 +240,14 @@ export async function refreshChat(db: Db, ctx: AuthCtx, chatId: string) {
   ownerOnly(ctx);
   const chat = await requireChat(db, ctx, chatId);
   if (!chat.selected) throw new SafeError('open this chat first', 409, 'not_opened');
+  await refreshSideMaps(db, chat.id);
   const busy = await db.execute(sql`SELECT 1 FROM analysis_jobs WHERE chat_id = ${chat.id}::uuid AND status IN ('pending','running') LIMIT 1`);
   if (busy.rows.length) return { analysing: 0, note: 'Analysis is already running for this chat.' };
   // Messages no analysis covers (e.g. their jobs were cancelled) are queued again:
   // entries held by cancelled/failed jobs are released, never-queued ones are added.
   const uncovered = sql`
     m.chat_id = ${chat.id}::uuid AND m.state = 'active' AND m.kind IN ('text','media') AND (m.expires_at IS NULL OR m.expires_at > now())
-    AND NOT EXISTS (SELECT 1 FROM placements p WHERE p.message_id = m.id)
+    AND NOT EXISTS (SELECT 1 FROM placements p WHERE p.message_id = m.id AND p.chat_id = m.chat_id)
     AND NOT EXISTS (SELECT 1 FROM analysis_units u WHERE u.chat_id = m.chat_id AND u.message_refs @> jsonb_build_array(jsonb_build_object('m', m.id::text)))`;
   await db.execute(sql`
     UPDATE analysis_outbox o SET dispatched_job_id = NULL, deletion_generation = ${chat.deletionGeneration}, selection_epoch = ${chat.selectionEpoch}
@@ -263,6 +273,26 @@ export async function refreshChat(db: Db, ctx: AuthCtx, chatId: string) {
     return { analysing: 0, note: 'Tidying the map into broader, single-subject topics with NVIDIA Nemotron…' };
   }
   return { analysing: total, note: total ? `Analysing ${total} message${total === 1 ? '' : 's'} with NVIDIA Nemotron…` : 'Already up to date.' };
+}
+
+/**
+ * "Map from: You / Others": start (or bring up to date) the chat's map built
+ * from only that side's messages. The worker analyses it like any map.
+ */
+export async function startSideMap(db: Db, ctx: AuthCtx, chatId: string, side: unknown) {
+  ownerOnly(ctx);
+  if (side !== 'mine' && side !== 'others') throw new SafeError('side must be "mine" or "others"');
+  const chat = await requireChat(db, ctx, chatId);
+  if (!chat.selected) throw new SafeError('open this chat first', 409, 'not_opened');
+  const r = await analyseSide(db, chat.id, side);
+  await notifyChange(db, { ws: chat.workspaceId, kind: 'analysis', chatId: chat.id });
+  return { analysing: r.jobs.length > 0, jobs: r.jobs.length };
+}
+
+/** Refresh brings a chat's one-sided maps up to date too. */
+async function refreshSideMaps(db: Db, chatId: string) {
+  const maps = await db.select({ side: s.chats.mapSide }).from(s.chats).where(eq(s.chats.mapOf, chatId));
+  for (const m of maps) if (m.side) await analyseSide(db, chatId, m.side as MapSide);
 }
 
 export async function requestHistory(db: Db, ctx: AuthCtx, chatId: string) {
@@ -322,7 +352,11 @@ export async function attachmentContent(db: Db, ctx: AuthCtx, attachmentId: stri
   const a = await authorizedAttachment(db, ctx, attachmentId);
   if (a.availability !== 'cached' || !a.objectKey) throw new SafeError('file is not available', 409, 'not_cached');
   const bytes = await getStorage().get(a.objectKey);
-  if (!bytes) throw new SafeError('file is not available', 409, 'not_cached');
+  if (!bytes) {
+    // The stored copy is gone (e.g. the container's files were reset): offer "Fetch file" again.
+    await db.update(s.attachments).set({ availability: 'available', objectKey: null }).where(eq(s.attachments.id, a.id));
+    throw new SafeError('file is not available; fetch it again', 409, 'not_cached');
+  }
   const mime = a.detectedMime ?? a.declaredMime ?? 'application/octet-stream';
   const inline = !download && INLINE_SAFE.has(mime);
   const safeName = (a.filename ?? `${a.mediaType}-${a.id.slice(0, 8)}`).replace(/[^\p{L}\p{N}._ -]/gu, '_').slice(0, 120);

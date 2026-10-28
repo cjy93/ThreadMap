@@ -92,7 +92,7 @@ export function BuildProgress({ chatKey, total, pending, jobs, failed, budgetPau
   }
   if (pending > 0) {
     const why = budgetPaused
-      ? 'Analysis paused because the daily model budget was reached.'
+      ? 'Analysis paused: one step used up its share of model calls. Click Refresh to carry on.'
       : failed
         ? 'The last analysis step failed before it finished.'
         : 'They arrived after the last analysis — Nemotron only runs when you open a chat or click Refresh.';
@@ -108,7 +108,7 @@ export function BuildProgress({ chatKey, total, pending, jobs, failed, budgetPau
         <div className="bp-text">
           <strong>Partial map:</strong> {pending.toLocaleString('en-US')} of {total.toLocaleString('en-US')} messages are not on the map yet. {why}
         </div>
-        {onRefresh && !budgetPaused ? (
+        {onRefresh ? (
           <button
             className="primary"
             onClick={(e) => {

@@ -2,6 +2,7 @@
 // The application assigns IDs, derives depth and rejects cycles, scope errors,
 // empty AI topics and unknown references. Model-supplied depth is never trusted.
 import type { RootEnum, Tree } from '../graph/tree';
+import { MAX_CHILD_TOPICS } from './prompts';
 import type { Taxonomy } from './schemas';
 
 export interface UnitInfo {
@@ -17,6 +18,8 @@ export interface PlannedTopic {
   title: string;
   aliases: string[];
   maySubdivide: boolean;
+  /** The model proposed narrower topics here, held back until this level is refined. */
+  narrower?: boolean;
 }
 
 export interface TaxonomyPlan {
@@ -24,6 +27,8 @@ export interface TaxonomyPlan {
   unitTargets: Map<string, { kind: 'existing'; id: string } | { kind: 'new'; key: string } | { kind: 'needs_review'; root: RootEnum }>;
   secondary: { messageRef: string; target: { kind: 'existing'; id: string } | { kind: 'new'; key: string } }[];
   rejected: string[];
+  /** Existing topics the model wanted narrower levels under: refined next, one level at a time. */
+  subdivideExisting: string[];
 }
 
 const norm = (t: string) => t.normalize('NFKC').trim().toLocaleLowerCase('und');
@@ -32,6 +37,40 @@ const norm = (t: string) => t.normalize('NFKC').trim().toLocaleLowerCase('und');
  * Validate a proposal. `allowedParents` restricts where new nodes may attach
  * (refinement of one branch); `allowedTargets` restricts unit assignment.
  */
+const titleWords = (x: string) =>
+  x
+    .toLocaleLowerCase('und')
+    .replace(/['’]s\b/g, '')
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean)
+    .map((w) => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w));
+
+/** Titles that say the same thing ("Software Development" / "software development's" / "Software developments"). */
+export function sameSubject(a: string, b: string): boolean {
+  // "Knowledge Root" under the Knowledge root is the root again.
+  const key = (x: string) => titleWords(x).filter((w) => w !== 'root').join(' ');
+  return key(a) === key(b);
+}
+
+const FILLER = new Set(['and', 'the', 'for', 'with', 'about', 'other', 'general', 'misc', 'miscellaneous', 'topic', 'related']);
+
+const meaningful = (x: string) => new Set(titleWords(x).filter((w) => w.length > 2 && !FILLER.has(w)));
+
+/**
+ * A subtopic that repeats its parent's subject without narrowing it: they share
+ * a meaningful word, but the child does not keep all of the parent's words and
+ * add its own ("Development Tools & Practices" > "Testing & Development Tools",
+ * "Software Development" > "Development"). "Books" > "Programming books" is a
+ * real narrowing and does not count.
+ */
+export function overlappingSubject(parent: string, child: string): boolean {
+  const p = meaningful(parent);
+  const c = meaningful(child);
+  const shared = [...c].some((w) => p.has(w));
+  const narrows = [...p].every((w) => c.has(w)) && c.size > p.size;
+  return shared && !narrows;
+}
+
 /** Whether a model-proposed title can name a topic: it must contain a letter or digit. */
 export function isTopicTitle(title: string): boolean {
   return /[\p{L}\p{N}]/u.test(title);
@@ -41,7 +80,15 @@ export function validateTaxonomy(
   tree: Tree,
   proposal: Taxonomy,
   units: UnitInfo[],
-  opts: { allowedParentIds?: Set<string>; allowedRefs?: Set<string>; defaultTarget?: string } = {},
+  opts: {
+    allowedParentIds?: Set<string>;
+    allowedRefs?: Set<string>;
+    defaultTarget?: string;
+    /** The map is built top-down, one level at a time: new topics may only attach to these. */
+    newParentIds?: Set<string>;
+    /** New topics may not be nested under other new topics in the same answer. */
+    oneLevel?: boolean;
+  } = {},
 ): TaxonomyPlan {
   const rejected: string[] = [];
   const rootIds: Record<string, string> = {};
@@ -93,6 +140,15 @@ export function validateTaxonomy(
   // not identity in general, but a duplicate sibling would be redundant).
   const alias = new Map<string, { kind: 'existing'; id: string } | { kind: 'new'; key: string }>();
   const ordered: PlannedTopic[] = [];
+  // Hard limit, never exceeded even for a moment: a parent holds at most MAX_CHILD_TOPICS topics.
+  const childCount = new Map<string, number>();
+  const subdivideExisting = new Set<string>();
+  const countKey = (p: { kind: 'existing'; id: string } | { kind: 'new'; key: string }) => (p.kind === 'existing' ? `e:${p.id}` : `n:${p.key}`);
+  const childrenOf = (p: { kind: 'existing'; id: string } | { kind: 'new'; key: string }) => {
+    const k = countKey(p);
+    if (!childCount.has(k)) childCount.set(k, p.kind === 'existing' ? (tree.nodes.get(p.id)?.childIds ?? []).filter((c) => !tree.nodes.get(c)?.needsReview).length : 0);
+    return childCount.get(k)!;
+  };
   const emit = (key: string) => {
     if (alias.has(key)) return;
     const r = resolved.get(key);
@@ -101,10 +157,27 @@ export function validateTaxonomy(
     if (r.parentRef.kind === 'new') emit(r.parentRef.key);
     const parentRef = r.parentRef.kind === 'new' ? alias.get(r.parentRef.key) : r.parentRef;
     if (!parentRef) return;
+    // Top-down: a level is built before the one beneath it. A topic proposed deeper than the level
+    // being built gives its discussions to its parent; they are split out when that parent is refined.
+    if ((opts.oneLevel && parentRef.kind === 'new') || (parentRef.kind === 'existing' && opts.newParentIds && !opts.newParentIds.has(parentRef.id))) {
+      alias.set(key, parentRef);
+      // The model saw narrower subjects here: split the parent next.
+      if (parentRef.kind === 'new') {
+        const p = ordered.find((o) => o.key === parentRef.key);
+        if (p) p.maySubdivide = p.narrower = true;
+      } else subdivideExisting.add(parentRef.id);
+      return;
+    }
     const title = n.title.trim();
     // A title with no letters or digits (e.g. "}],", a fragment of the model's JSON) is not a
     // topic: its units and subtopics go to its parent instead.
     if (!isTopicTitle(title)) {
+      alias.set(key, parentRef);
+      return;
+    }
+    // A child titled like its parent ("Software Development" under "Software Development") adds no level.
+    const parentTitle = parentRef.kind === 'existing' ? tree.nodes.get(parentRef.id)?.title : ordered.find((o) => o.key === parentRef.key)?.title;
+    if (parentTitle && sameSubject(title, parentTitle)) {
       alias.set(key, parentRef);
       return;
     }
@@ -122,6 +195,13 @@ export function validateTaxonomy(
         return;
       }
     }
+    // A full level takes no more topics: the discussions stay on the parent, to be placed in (or
+    // beneath) its existing topics.
+    if (childrenOf(parentRef) >= MAX_CHILD_TOPICS) {
+      alias.set(key, parentRef);
+      return;
+    }
+    childCount.set(countKey(parentRef), childrenOf(parentRef) + 1);
     ordered.push({ key, parentRef, root: r.root, title, aliases: n.aliases, maySubdivide: n.may_subdivide });
     alias.set(key, { kind: 'new', key });
   };
@@ -196,7 +276,7 @@ export function validateTaxonomy(
     return used.has(o.key);
   });
 
-  return { newTopics: kept, unitTargets, secondary, rejected };
+  return { newTopics: kept, unitTargets, secondary, rejected, subdivideExisting: [...subdivideExisting] };
 }
 
 function isUnder(tree: Tree, id: string, allowed: Set<string>): boolean {

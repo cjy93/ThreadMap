@@ -9,6 +9,9 @@ import { ancestors, loadTree, ROOTS } from '../src/server/graph/tree';
 import { ensurePrivateWorkspace } from '../src/server/workspace';
 import { createTestDb, createUser, type TestDb } from './helpers/db';
 
+// These tests cover related topics across chats, which are off by default.
+process.env.CROSS_CHAT_LINKS = '1';
+
 const bundle = loadFixtureBundle();
 const M = bundle.manifest;
 let t: TestDb;
@@ -69,12 +72,13 @@ describe('fixture load + FixtureModelProvider pipeline', () => {
     expect(byPath.get('K/Programming/Hackathons/Tips')).toBeDefined();
     expect(byPath.get('K/Programming/School work/Tips')).toBeDefined();
     expect(byPath.get('K/Programming/Hackathons/Tips')).not.toBe(byPath.get('K/Programming/School work/Tips'));
-    // Refinement the model asked for continued under the same logical job (frontiers completed);
-    // deepening of crowded topics after the map is built runs under ledgers of its own.
+    // Refinements the model asked for (and deepening of crowded topics after the map is built)
+    // run under ledgers of their own, never the build's (frontiers completed).
     const fr = await t.db.select().from(s.taxonomyFrontiers).where(eq(s.taxonomyFrontiers.chatId, chatIds.builders));
     const asked = fr.filter((f) => !(f.checkpoint as { deepen?: boolean }).deepen);
     expect(asked.length).toBeGreaterThan(0);
-    expect(new Set(asked.map((f) => f.logicalJobId)).size).toBe(1);
+    const builds = new Set((await t.db.select().from(s.analysisJobs).where(and(eq(s.analysisJobs.chatId, chatIds.builders), eq(s.analysisJobs.kind, 'rebuild')))).map((j) => j.logicalJobId));
+    expect(asked.filter((f) => builds.has(f.logicalJobId))).toEqual([]);
     expect(fr.every((f) => f.status === 'completed')).toBe(true);
   });
 

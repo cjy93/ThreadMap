@@ -1,11 +1,11 @@
 // Model router: budget reservation, bounded network retries, schema validation
 // with one repair call, and a model_runs record per attempt.
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { z } from 'zod';
 import type { LlmConfig } from '../../lib/config';
 import * as s from '../../db/schema';
 import type { Db } from '../db';
-import { sleep } from '../util';
+import { sha256, sleep } from '../util';
 import { extractJson, ProviderError, type FixtureHints, type ModelProvider, type Role } from './provider';
 import { PROMPT_VERSION, SCHEMA_VERSION } from './schemas';
 
@@ -13,7 +13,7 @@ import { PROMPT_VERSION, SCHEMA_VERSION } from './schemas';
 const BUSY_RETRIES = 4;
 
 export class BudgetExceededError extends Error {
-  constructor(readonly scope: 'job' | 'day') {
+  constructor(readonly scope: 'job' | 'day' | 'user') {
     super(`inference budget exhausted (${scope})`);
   }
 }
@@ -37,13 +37,32 @@ export interface CallScope {
 const usdMicros = (usd: number) => Math.round(usd * 1_000_000);
 const today = () => new Date().toISOString().slice(0, 10);
 
-function prices(cfg: LlmConfig): Record<string, { input: number; output: number }> {
+type Price = { input: number; output: number };
+/** Charged for a live model missing from NEBIUS_PRICE_JSON, so the per-user cap still holds. */
+const UNKNOWN_MODEL_PRICE: Price = { input: 1, output: 3 };
+
+function prices(cfg: LlmConfig): Record<string, Price> {
   if (!cfg.NEBIUS_PRICE_JSON) return {};
   try {
-    return JSON.parse(cfg.NEBIUS_PRICE_JSON) as Record<string, { input: number; output: number }>;
+    return JSON.parse(cfg.NEBIUS_PRICE_JSON) as Record<string, Price>;
   } catch {
     return {};
   }
+}
+
+/** Whose allowance a call draws on: the WhatsApp number when linked, else the workspace. */
+export interface Allowance {
+  subject: string;
+  unlimited: boolean;
+}
+
+export const phoneFingerprint = (phone: string) => sha256(`wa-account:${phone.replace(/\D/g, '')}`);
+
+export async function allowanceFor(db: Db, workspaceId: string, cfg: LlmConfig): Promise<Allowance> {
+  const [la] = await db.select({ fp: s.linkedAccounts.accountFingerprint }).from(s.linkedAccounts).where(eq(s.linkedAccounts.workspaceId, workspaceId));
+  if (!la?.fp) return { subject: `ws:${workspaceId}`, unlimited: false };
+  const unlimited = (cfg.LLM_UNLIMITED_PHONES ?? '').split(',').some((p) => p.trim() && phoneFingerprint(p) === la.fp);
+  return { subject: `wa:${la.fp}`, unlimited };
 }
 
 export function estimateTokens(text: string): number {
@@ -58,14 +77,29 @@ export async function ensureLedger(db: Db, workspaceId: string, logicalJobId: st
     .onConflictDoNothing();
 }
 
-async function reserve(db: Db, logicalJobId: string, cfg: LlmConfig, estMicros: number) {
+/** Reserve one call against the job, the user's allowance and the day; unlimited users skip the USD caps. */
+async function reserve(db: Db, logicalJobId: string, cfg: LlmConfig, estMicros: number, who: Allowance) {
   const job = await db.execute(sql`
     UPDATE budget_ledger SET calls_reserved = calls_reserved + 1, usd_micros_reserved = usd_micros_reserved + ${estMicros}, updated_at = now()
     WHERE logical_job_id = ${logicalJobId}::uuid
       AND calls_reserved + calls_used < max_calls
-      AND usd_micros_reserved + usd_micros_used + ${estMicros} <= max_usd_micros
+      AND (${who.unlimited} OR usd_micros_reserved + usd_micros_used + ${estMicros} <= max_usd_micros)
     RETURNING logical_job_id`);
   if (!job.rows.length) throw new BudgetExceededError('job');
+  const releaseJob = () =>
+    db.execute(sql`UPDATE budget_ledger SET calls_reserved = calls_reserved - 1, usd_micros_reserved = usd_micros_reserved - ${estMicros} WHERE logical_job_id = ${logicalJobId}::uuid`);
+  const userCap = usdMicros(cfg.LLM_MAX_USD_PER_USER);
+  await db.execute(sql`INSERT INTO usage_allowance (subject) VALUES (${who.subject}) ON CONFLICT DO NOTHING`);
+  const u = await db.execute(sql`
+    UPDATE usage_allowance SET usd_micros_reserved = usd_micros_reserved + ${estMicros}, updated_at = now()
+    WHERE subject = ${who.subject}
+      AND (${who.unlimited} OR ${userCap} <= 0 OR usd_micros_reserved + usd_micros_used + ${estMicros} <= ${userCap})
+    RETURNING subject`);
+  if (!u.rows.length) {
+    await releaseJob();
+    throw new BudgetExceededError('user');
+  }
+  if (who.unlimited) return null;
   const day = today();
   await db.execute(sql`INSERT INTO daily_budget (day, max_usd_micros) VALUES (${day}, ${usdMicros(cfg.LLM_MAX_USD_PER_DAY)}) ON CONFLICT DO NOTHING`);
   const d = await db.execute(sql`
@@ -73,18 +107,23 @@ async function reserve(db: Db, logicalJobId: string, cfg: LlmConfig, estMicros: 
     WHERE day = ${day} AND usd_micros_reserved + usd_micros_used + ${estMicros} <= max_usd_micros
     RETURNING day`);
   if (!d.rows.length) {
-    await db.execute(sql`UPDATE budget_ledger SET calls_reserved = calls_reserved - 1, usd_micros_reserved = usd_micros_reserved - ${estMicros} WHERE logical_job_id = ${logicalJobId}::uuid`);
+    await releaseJob();
+    await db.execute(sql`UPDATE usage_allowance SET usd_micros_reserved = usd_micros_reserved - ${estMicros} WHERE subject = ${who.subject}`);
     throw new BudgetExceededError('day');
   }
   return day;
 }
 
-async function settle(db: Db, logicalJobId: string, day: string, estMicros: number, actualMicros: number, tokens: { input: number; output: number }) {
+async function settle(db: Db, logicalJobId: string, who: Allowance, day: string | null, estMicros: number, actualMicros: number, tokens: { input: number; output: number }) {
   await db.execute(sql`
     UPDATE budget_ledger SET calls_reserved = calls_reserved - 1, calls_used = calls_used + 1,
       usd_micros_reserved = usd_micros_reserved - ${estMicros}, usd_micros_used = usd_micros_used + ${actualMicros},
       input_tokens = input_tokens + ${tokens.input}, output_tokens = output_tokens + ${tokens.output}, updated_at = now()
     WHERE logical_job_id = ${logicalJobId}::uuid`);
+  await db.execute(sql`
+    UPDATE usage_allowance SET usd_micros_reserved = usd_micros_reserved - ${estMicros}, usd_micros_used = usd_micros_used + ${actualMicros}, updated_at = now()
+    WHERE subject = ${who.subject}`);
+  if (day === null) return;
   await db.execute(sql`
     UPDATE daily_budget SET usd_micros_reserved = usd_micros_reserved - ${estMicros}, usd_micros_used = usd_micros_used + ${actualMicros}
     WHERE day = ${day}`);
@@ -124,23 +163,24 @@ export async function callModel<T>(deps: RouterDeps, scope: CallScope, call: Mod
   }
   const maxOut = Math.min(call.maxOutputTokens ?? cfg.LLM_MAX_OUTPUT_TOKENS_PER_CALL, cfg.LLM_MAX_OUTPUT_TOKENS_PER_CALL);
   const priceTable = prices(cfg);
+  const who = await allowanceFor(db, scope.workspaceId, cfg);
   let calls = 0;
 
   const attempt = async (role: Role, operation: string, system: string, user: string, attemptNo: number, thinking = call.thinking) => {
     const modelId = provider.modelIdFor(role);
-    const p = priceTable[modelId];
+    const p = priceTable[modelId] ?? (provider.kind === 'nebius' ? UNKNOWN_MODEL_PRICE : undefined);
     const est = p ? usdMicros((inTokens * p.input + maxOut * p.output) / 1_000_000) : 0;
-    const day = await reserve(db, scope.logicalJobId, cfg, est);
+    const day = await reserve(db, scope.logicalJobId, cfg, est, who);
     const started = Date.now();
     calls++;
     deps.onCall?.(role, operation);
     try {
       const r = await provider.complete({ role, operation, system, user, maxOutputTokens: maxOut, schemaName: call.schemaName, jsonSchema: call.jsonSchema, fixtureHints: call.hints, thinking, images: call.images });
       const actual = p && r.usage.input !== null && r.usage.output !== null ? usdMicros((r.usage.input * p.input + r.usage.output * p.output) / 1_000_000) : est;
-      await settle(db, scope.logicalJobId, day, est, actual, { input: r.usage.input ?? 0, output: r.usage.output ?? 0 });
+      await settle(db, scope.logicalJobId, who, day, est, actual, { input: r.usage.input ?? 0, output: r.usage.output ?? 0 });
       return { r, started, actual, modelId };
     } catch (e) {
-      await settle(db, scope.logicalJobId, day, est, 0, { input: 0, output: 0 });
+      await settle(db, scope.logicalJobId, who, day, est, 0, { input: 0, output: 0 });
       await db.insert(s.modelRuns).values({
         workspaceId: scope.workspaceId,
         logicalJobId: scope.logicalJobId,

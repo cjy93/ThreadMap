@@ -7,13 +7,28 @@ import { ASK_REPLY_CHANNEL, EVENTS_CHANNEL, QR_CHANNEL, type ChangeEvent } from 
 
 type Listener = (ev: { type: string; data: unknown }) => void;
 
+/** The worker's reply to an Ask-channel request: its result, or why it could not answer. */
+export type WorkerReply = ({ ok: true } & Record<string, unknown>) | { ok: false; reason: string };
+export interface LateReply {
+  ws: string;
+  kind: string;
+  state: 'pending' | 'done' | 'failed';
+  reply?: Record<string, unknown>;
+  reason?: string;
+  expiresAt: number;
+}
+const LATE_KEEP_MS = 10 * 60_000;
+
 interface Hub {
   subs: Map<string, Set<Listener>>;
   qr: Map<string, { qr: string; expiresAt: number }>;
   // Phone-number pairing codes, like QR payloads: owner-only, memory-only, short-lived.
   codes?: Map<string, { code: string; expiresAt: number }>;
   // Pending Ask requests awaiting the worker's reply, by request id.
-  asks?: Map<string, (reply: unknown) => void>;
+  asks?: Map<string, (reply: WorkerReply) => void>;
+  // Replies still on their way when the web request stopped waiting: the worker carries on, and
+  // the page collects the result here a little later (owner workspace only, kept briefly).
+  late?: Map<string, LateReply>;
   client?: pg.Client;
   starting?: Promise<void>;
 }
@@ -44,8 +59,8 @@ async function start(): Promise<void> {
       try {
         const payload = JSON.parse(n.payload ?? '{}');
         if (n.channel === ASK_REPLY_CHANNEL) {
-          const { id, ok, ...rest } = payload as { id: string; ok: boolean };
-          hub.asks?.get(id)?.(ok ? rest : null);
+          const { id, ...rest } = payload as { id: string } & WorkerReply;
+          hub.asks?.get(id)?.(rest as WorkerReply);
           return;
         }
         if (n.channel === QR_CHANNEL) {
@@ -83,24 +98,43 @@ export async function subscribe(ws: string, l: Listener): Promise<() => void> {
   };
 }
 
-/** Register for the worker's answer to an Ask request before sending it; resolves null on timeout. */
-export async function prepareAskReply(id: string, timeoutMs: number): Promise<{ reply: Promise<unknown> }> {
+/**
+ * Register for the worker's answer to an Ask request before sending it. Resolves with
+ * the reply, or null on timeout; a reply arriving after the timeout is kept for
+ * `lateAskReply` (the worker does not stop because the page stopped waiting).
+ */
+export async function prepareAskReply(id: string, timeoutMs: number, meta: { ws: string; kind: string }): Promise<{ reply: Promise<WorkerReply | null> }> {
   await start();
   hub.asks ??= new Map();
+  hub.late ??= new Map();
   const asks = hub.asks;
+  const late = hub.late;
+  for (const [k, v] of late) if (v.expiresAt < Date.now()) late.delete(k);
   // Wrapped: an async function returning a bare promise would wait for the reply itself.
-  const reply = new Promise<unknown>((resolve) => {
+  const reply = new Promise<WorkerReply | null>((resolve) => {
     const timer = setTimeout(() => {
-      asks.delete(id);
+      late.set(id, { ...meta, state: 'pending', expiresAt: Date.now() + LATE_KEEP_MS });
+      asks.set(id, (r) => {
+        asks.delete(id);
+        late.set(id, r.ok ? { ...meta, state: 'done', reply: r, expiresAt: Date.now() + LATE_KEEP_MS } : { ...meta, state: 'failed', reason: r.reason, expiresAt: Date.now() + LATE_KEEP_MS });
+      });
+      // Give up on a reply that never comes.
+      setTimeout(() => asks.delete(id), LATE_KEEP_MS).unref?.();
       resolve(null);
     }, timeoutMs);
-    asks.set(id, (reply) => {
+    asks.set(id, (r) => {
       clearTimeout(timer);
       asks.delete(id);
-      resolve(reply);
+      resolve(r);
     });
   });
   return { reply };
+}
+
+/** A reply that came (or is still coming) after its request stopped waiting; only for its own workspace. */
+export function lateAskReply(id: string, ws: string): LateReply | null {
+  const r = hub.late?.get(id);
+  return r && r.ws === ws && r.expiresAt > Date.now() ? r : null;
 }
 
 export function currentPairingCode(ws: string): string | null {

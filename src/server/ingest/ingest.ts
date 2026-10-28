@@ -255,20 +255,55 @@ async function applyAlias(tx: Tx, ctx: IngestContext, ev: AliasEvent) {
     if (chat && chat.kind === 'direct') {
       const other = await findChatByJid(tx, ctx, b);
       if (!other) await addChatAlias(tx, ctx, chat.id, b, 'lid_mapping');
-      else if (other.id !== chat.id) {
+      else if (other.id !== chat.id && other.kind === 'direct' && !(await mergeDirectChats(tx, ctx, chat, other))) {
         await tx
           .update(s.syncCoverage)
           .set({ warnings: sql`${s.syncCoverage.warnings} || ${JSON.stringify([{ type: 'alias_conflict', at: new Date().toISOString() }])}::jsonb` })
           .where(eq(s.syncCoverage.chatId, chat.id));
       }
-      // Knowing the number behind a hidden ID lets a saved contact name apply.
-      const [current] = await tx.select().from(s.chats).where(eq(s.chats.id, chat.id));
+      // Knowing the number behind a hidden ID lets a saved contact name apply (to the chat that
+      // remains, if the two were just merged).
+      const live = (await findChatByJid(tx, ctx, a)) ?? chat;
+      const [current] = await tx.select().from(s.chats).where(eq(s.chats.id, live.id));
       if (isPlaceholderTitle(current.title)) {
         const name = (await knownName(tx, ctx, [ev.pn, ev.lid])) ?? (isUnknownTitle(current.title) ? phoneTitle(ev.pn) : null);
         if (name) await setDirectTitle(tx, current, name);
       }
     }
   }
+}
+
+/**
+ * One person seen under both their number and their hidden ID became two direct
+ * chats. Opening one then missed everything WhatsApp sent under the other
+ * address (history included): unopened chats keep no content. Once a mapping
+ * proves they are the same person, fold them into one. Only when at most one
+ * of them holds messages; two filled chats stay apart (with a warning). The one
+ * kept is the one with messages, else the opened one, else the older one.
+ * Returns whether they were merged.
+ */
+async function mergeDirectChats(tx: Tx, ctx: IngestContext, a: ChatRow, b: ChatRow): Promise<boolean> {
+  const count = async (id: string) => (await tx.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM messages WHERE chat_id = ${id}::uuid`)).rows[0].n;
+  const [na, nb] = [await count(a.id), await count(b.id)];
+  if (na > 0 && nb > 0) return false;
+  const keepA = na > 0 || (nb === 0 && (a.selected !== b.selected ? a.selected : a.createdAt <= b.createdAt));
+  const [keep, drop] = keepA ? [a, b] : [b, a];
+  // Every address of the dropped chat now reaches the kept one.
+  await tx.update(s.chatAliases).set({ chatId: keep.id }).where(eq(s.chatAliases.chatId, drop.id));
+  await addChatAlias(tx, ctx, keep.id, drop.nativeJid, 'lid_mapping');
+  const newer = (x: ChatRow) => x.historyAnchor?.ts ?? 0;
+  await tx
+    .update(s.chats)
+    .set({
+      lastEventAt: sql`GREATEST(${s.chats.lastEventAt}, ${drop.lastEventAt})`,
+      ...(newer(drop) > newer(keep) ? { historyAnchor: drop.historyAnchor } : {}),
+      ...(!keep.avatarKey && drop.avatarKey ? { avatarKey: drop.avatarKey, avatarCheckedAt: drop.avatarCheckedAt } : {}),
+      // Opened under either address means opened.
+      ...(!keep.selected && drop.selected ? { selected: true, historyMode: drop.historyMode, newOnlyCutoff: drop.newOnlyCutoff, autoAnalyzeUntil: drop.autoAnalyzeUntil } : {}),
+    })
+    .where(eq(s.chats.id, keep.id));
+  await tx.delete(s.chats).where(eq(s.chats.id, drop.id));
+  return true;
 }
 
 function attachmentDescriptor(a: MessageEvent['attachments'][number]) {

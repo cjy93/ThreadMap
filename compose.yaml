@@ -15,7 +15,12 @@ services:
     depends_on: { migrate: { condition: service_completed_successfully } }
     ports: ['3000:3000']
     env_file: [.env.compose]
+    # Downloaded photos and files live here; a volume keeps them when the container is recreated.
+    volumes: ['tm-objects:/app/.data']
     environment:
       DATABASE_URL: 'postgres://threadmap:devpass@db:5432/threadmap'
       COMPANION_DATABASE_URL: 'postgres://threadmap:devpass@db:5432/threadmap'
       WORKER_DATABASE_URL: 'postgres://threadmap:devpass@db:5432/threadmap'
+
+volumes:
+  tm-objects: {}

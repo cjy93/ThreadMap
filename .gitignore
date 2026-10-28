@@ -238,3 +238,6 @@ playwright-report/
 *.tsbuildinfo
 next-env.d.ts
 deploy/nebius/.state/
+
+# Supabase server CA for verified TLS (see docs/threadmap/ENCRYPTION.md)
+deploy/vm/supabase-ca.crt

@@ -22,7 +22,8 @@ export interface ProjectionInput {
   collapsed: Set<string>;
   focusId?: string | null;
   childOffsets: Record<string, number>;
-  showDiscussions: boolean;
+  /** Branches the viewer opened whose children the node budget left out: always loaded. */
+  expandIds?: string[];
   selectedTopicIds: string[];
   filterActive: boolean;
   view: ViewConfig;
@@ -31,7 +32,7 @@ export interface ProjectionInput {
 
 export interface MapNode {
   id: string;
-  kind: 'CATEGORY' | 'TOPIC' | 'DISCUSSION';
+  kind: 'CATEGORY' | 'TOPIC';
   root: string;
   parent_id: string | null;
   title: string;
@@ -98,6 +99,7 @@ export function projectMap(input: ProjectionInput): MapProjection {
   const out: MapNode[] = [];
   const edges: { source: string; target: string }[] = [];
   const seen = new Set<string>();
+  const placed = new Map<string, { node: MapNode; kids: TreeNode[] }>();
   let truncated = false;
 
   const push = (n: TreeNode) => {
@@ -123,6 +125,7 @@ export function projectMap(input: ProjectionInput): MapProjection {
     };
     out.push(node);
     seen.add(n.id);
+    placed.set(n.id, { node, kids });
     if (n.parentId && seen.has(n.parentId)) edges.push({ source: n.parentId, target: n.id });
     return { node, kids };
   };
@@ -157,37 +160,23 @@ export function projectMap(input: ProjectionInput): MapProjection {
     node.next_child_offset = consumed < kids.length ? consumed : null;
   }
 
-  if (input.showDiscussions) {
-    for (const { n } of queue) {
-      for (const d of discByTopic.get(n.id) ?? []) {
-        if (out.length >= budget) {
-          truncated = true;
-          break;
-        }
-        const c = counts.discussions.get(d.id) ?? { total: 0, missed: 0 };
-        if (input.filterActive && c.total === 0) continue;
-        out.push({
-          id: d.id,
-          kind: 'DISCUSSION',
-          root: n.root,
-          parent_id: n.id,
-          title: d.title,
-          depth: n.depth,
-          matching_message_count: c.total,
-          matching_missed_count: c.missed,
-          child_topic_count: 0,
-          children_shown: 0,
-          next_child_offset: null,
-          boundary: false,
-          has_deeper_topics: false,
-          collapsed: false,
-          needs_review: false,
-          discussion_count: 0,
-        });
-        edges.push({ source: n.id, target: d.id });
-      }
+  // Branches opened beyond the budget: their first page of children is loaded anyway, so any
+  // depth can be reached one click at a time without focusing the branch.
+  const opened = [...new Set(input.expandIds ?? [])].map((id) => tree.nodes.get(id)).filter((n): n is TreeNode => !!n).sort((a, b) => a.depth - b.depth);
+  for (const n of opened) {
+    const p = placed.get(n.id);
+    if (!p || p.node.children_shown > 0 || input.collapsed.has(n.id) || n.depth >= bound) continue;
+    const offset = Math.max(0, Math.min(input.childOffsets[n.id] ?? 0, p.kids.length));
+    for (const k of p.kids.slice(offset, offset + childPage)) {
+      if (seen.has(k.id)) continue;
+      push(k);
+      p.node.children_shown++;
     }
+    const consumed = offset + p.node.children_shown;
+    p.node.next_child_offset = consumed < p.kids.length ? consumed : null;
   }
+  // A node with topics beneath it that were not sent can be opened to load them.
+  for (const { node } of placed.values()) if (node.has_deeper_topics && node.children_shown === 0) node.boundary = true;
 
   const hidden = input.selectedTopicIds
     .filter((id) => tree.nodes.has(id) && !seen.has(id))

@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, filterParams, qs, type FilterState } from './client';
-import type { ContentFile, ContentMessage, ContentResponse, PathItem, SourceMessage } from './types';
+import { api, filterParams, openOnDoubleClick, qs, sourceNumbers, type FilterState } from './client';
+import type { ChainMessage, ContentFile, ContentMessage, ContentResponse, PathItem, SourceMessage } from './types';
 
 const pathText = (p: PathItem[]) => p.map((x) => x.title).join(' › ');
 const time = (s: string | null, tz: string) => (s ? new Date(s).toLocaleString('en-SG', { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }) : 'Unknown time');
@@ -50,27 +50,177 @@ function MediaView({ a, onFetch }: { a: MediaItem; onFetch: (id: string) => void
   );
 }
 
-interface RelatedItem {
-  link_id: string;
-  relation_type: string;
-  reason: string;
-  a: { chat_id: string; chat_title: string; topic_id: string; path: PathItem[]; evidence: { message_id: string; sender: string; snippet: string }[] };
-  b: { chat_id: string; chat_title: string; topic_id: string; path: PathItem[]; evidence: { message_id: string; sender: string; snippet: string }[] };
+/**
+ * The message a reply quotes, shown above it like WhatsApp does; opens it when it is clickable on
+ * its own. `inferred`: no WhatsApp reply, but Nemotron read it as answering that message.
+ */
+function Quote({ q, onOpen, inferred }: { q: { sender: string; snippet: string | null }; onOpen?: () => void; inferred?: boolean }) {
+  const body = (
+    <>
+      <strong>{inferred ? '↪ answers' : '↩'} {q.sender}</strong> {q.snippet ? q.snippet.slice(0, 160) : '(removed)'}
+    </>
+  );
+  const title = inferred ? 'Answers this earlier message (worked out by Nemotron; Reply was not used)' : 'The message this replies to';
+  return onOpen ? (
+    <button className={`quote ${inferred ? 'inferred' : ''}`} title={`${title}. Click to open it.`} onClick={onOpen}>
+      {body}
+    </button>
+  ) : (
+    <div className={`quote ${inferred ? 'inferred' : ''}`} title={title}>
+      {body}
+    </div>
+  );
+}
+
+// Messages per page of the Chatroom (as the server sends them).
+const CHATROOM_PAGE = 15;
+
+/**
+ * Chatroom: the chat in time order around the opened message, as in WhatsApp.
+ * Scrolling to the top or bottom loads the next page of earlier or later messages.
+ */
+function Chatroom({ first, tz, onOpen }: { first: SourceMessage['context']; tz: string; onOpen: (id: string) => void }) {
+  const [items, setItems] = useState(first);
+  const at = first.findIndex((c) => c.current);
+  const [more, setMore] = useState({ before: at >= CHATROOM_PAGE, after: first.length - 1 - at >= CHATROOM_PAGE });
+  const box = useRef<HTMLElement>(null);
+  const busy = useRef(false);
+  useEffect(() => {
+    const el = box.current;
+    const cur = el?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (el && cur) el.scrollTop = cur.offsetTop - el.offsetTop - 80;
+  }, []);
+  const load = async (dir: 'before' | 'after') => {
+    if (busy.current || !more[dir] || !items.length) return;
+    busy.current = true;
+    const edge = dir === 'before' ? items[0] : items[items.length - 1];
+    const r = await api<{ messages: SourceMessage['context']; more: boolean }>(`/api/messages/${edge.message_id}/chatroom?dir=${dir}`).catch(() => null);
+    const el = box.current;
+    const height = el?.scrollHeight ?? 0;
+    if (r) {
+      setItems((cur) => (dir === 'before' ? [...r.messages, ...cur] : [...cur, ...r.messages]));
+      setMore((m) => ({ ...m, [dir]: r.more }));
+      // Keep the view still while earlier messages are added above it.
+      if (dir === 'before' && el) requestAnimationFrame(() => (el.scrollTop += el.scrollHeight - height));
+    }
+    busy.current = false;
+  };
+  return (
+    <section
+      aria-label="Chatroom"
+      className="thread thread-catalog"
+      ref={box}
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        if (el.scrollTop < 60) void load('before');
+        if (el.scrollHeight - el.scrollTop - el.clientHeight < 60) void load('after');
+      }}
+    >
+      {more.before ? (
+        <button className="thread-label" onClick={() => void load('before')}>
+          ↑ Earlier messages
+        </button>
+      ) : (
+        <div className="thread-label">Start of the saved chat</div>
+      )}
+      {items.map((c) =>
+        c.current ? (
+          <div key={c.message_id} className={`tmsg current ${c.direction === 'outgoing' ? 'mine' : ''}`} aria-current="true">
+            <div className="meta">
+              <strong>{c.sender}</strong> · {time(c.sent_at, tz)} · this message
+            </div>
+            {c.snippet ?? '(removed)'}
+          </div>
+        ) : (
+          <div key={c.message_id} className={`tmsg ${c.direction === 'outgoing' ? 'mine' : ''}`} {...openOnDoubleClick(() => onOpen(c.message_id))}>
+            <div className="meta">
+              <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
+            </div>
+            {c.snippet ?? '(removed)'}
+          </div>
+        ),
+      )}
+      {more.after ? (
+        <button className="thread-label" onClick={() => void load('after')}>
+          ↓ Later messages
+        </button>
+      ) : (
+        <div className="thread-label">Latest saved message</div>
+      )}
+    </section>
+  );
+}
+
+/** One message of a reply chain, indented by how many reply steps it is from the opened message. */
+function ChainItem({ c, tz, onOpen }: { c: ChainMessage; tz: string; onOpen: () => void }) {
+  return (
+    <div className={`tmsg ${c.direction === 'outgoing' ? 'mine' : ''}`} style={{ marginLeft: Math.min(c.depth - 1, 4) * 14 }} {...openOnDoubleClick(onOpen)}>
+      <div className="meta">
+        <strong>{c.sender}</strong> · {time(c.sent_at, tz)} · {c.depth === 1 ? 'direct' : `${c.depth} replies away`}
+        {c.inferred ? <span title="Reply was not used; Nemotron read this as an answer"> · inferred</span> : null}
+      </div>
+      {c.snippet ?? '(removed)'}
+    </div>
+  );
 }
 
 /** Exact source with revision-aware two-second foreground dwell. */
-export function SourceView({ messageId, tz, dwellMs, autoRead, suppressed, onSuppress, onChanged, onOpenMessage }: { messageId: string; tz: string; dwellMs: number; autoRead: boolean; suppressed: boolean; onSuppress: (id: string) => void; onChanged: () => void; onOpenMessage: (chatId: string, id: string) => void }) {
+export function SourceView({ messageId, tz, dwellMs, suppressed, onSuppress, onChanged, onOpenMessage }: { messageId: string; tz: string; dwellMs: number; suppressed: boolean; onSuppress: (id: string) => void; onChanged: () => void; onOpenMessage: (chatId: string, id: string) => void }) {
   const [m, setM] = useState<SourceMessage | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [fileState, setFileState] = useState<Record<string, string>>({});
+  const threadBox = useRef<HTMLElement>(null);
+  // Below the message: its whole discussion, or its WhatsApp reply chain (what it replies to and the replies to it).
+  const [around, setAround] = useState<'chain' | 'chatroom' | 'topic'>('chain');
+  // Topic thread: more of the chat loaded above and below it on request.
+  const [lead, setLead] = useState<SourceMessage['context']>([]);
+  const [tail, setTail] = useState<SourceMessage['context']>([]);
+  const [leadMore, setLeadMore] = useState(true);
+  const [tailMore, setTailMore] = useState(true);
+  const loadAround = async (dir: 'before' | 'after', from: string) => {
+    const r = await api<{ messages: SourceMessage['context']; more: boolean }>(`/api/messages/${from}/chatroom?dir=${dir}`).catch(() => null);
+    if (!r) return;
+    if (dir === 'before') {
+      setLead((cur) => [...r.messages, ...cur]);
+      setLeadMore(r.more);
+    } else {
+      setTail((cur) => [...cur, ...r.messages]);
+      setTailMore(r.more);
+    }
+  };
   const load = useCallback(() => {
     api<SourceMessage>(`/api/messages/${messageId}`).then(setM, (e: Error) => setErr(e.message));
   }, [messageId]);
   useEffect(load, [load]);
+  // Answers given without WhatsApp's Reply: Nemotron reads an opened discussion for them once.
+  const [answersNote, setAnswersNote] = useState<string | null>(null);
+  const needsAnswers = Boolean(m?.thread && !m.thread.answers_checked);
+  useEffect(() => {
+    if (!needsAnswers) return;
+    let live = true;
+    api<{ checked: boolean; note?: string }>(`/api/messages/${messageId}/answers`, { method: 'POST' }).then(
+      (r) => {
+        if (!live) return;
+        setAnswersNote(r.checked ? null : (r.note ?? null));
+        if (r.checked) load();
+      },
+      (e: Error) => live && setAnswersNote(e.message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [needsAnswers, messageId, load]);
+  // The discussion list opens scrolled to this message.
+  const threadLoaded = Boolean(m?.thread) && around === 'topic';
+  useEffect(() => {
+    const box = threadBox.current;
+    const cur = box?.querySelector<HTMLElement>('[aria-current="true"]');
+    if (box && cur) box.scrollTop = cur.offsetTop - box.offsetTop - 60;
+  }, [threadLoaded]);
 
   // Dwell timer: pauses/resets when hidden, unfocused, closed, or revision changes.
   useEffect(() => {
-    if (!m || !m.reviewable || m.review === 'read' || !autoRead || suppressed) return;
+    if (!m || !m.reviewable || m.review === 'read' || suppressed) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const arm = () => {
       if (timer) clearTimeout(timer);
@@ -93,10 +243,11 @@ export function SourceView({ messageId, tz, dwellMs, autoRead, suppressed, onSup
       window.removeEventListener('focus', arm);
       window.removeEventListener('blur', arm);
     };
-  }, [m, autoRead, suppressed, dwellMs, load, onChanged]);
+  }, [m, suppressed, dwellMs, load, onChanged]);
 
   if (err) return <p role="alert">{err}</p>;
   if (!m) return <p>Loading source…</p>;
+  const chainCount = m.reply_chain.before.length + m.reply_chain.after.length;
   const mark = async (status: 'read' | 'missed') => {
     if (status === 'missed') onSuppress(m.message_id);
     await api('/api/review', { method: 'POST', json: { message_id: m.message_id, status, revision: m.content_revision, source: 'manual' } });
@@ -147,31 +298,124 @@ export function SourceView({ messageId, tz, dwellMs, autoRead, suppressed, onSup
         <p>
           Status: <strong className={m.review === 'missed' ? 'missed' : 'readbadge'}>{m.review === 'missed' ? 'Missed' : 'Read'}</strong>{' '}
           <button onClick={() => mark('read')}>Mark Read</button> <button onClick={() => mark('missed')}>Mark Missed</button>
-          {m.review === 'missed' && autoRead && !suppressed ? <span className="counts"> · marks Read after 2 s in view</span> : null}
+          {m.review === 'missed' && !suppressed ? <span className="counts"> · marks Read after 2 s in view</span> : null}
         </p>
       ) : null}
-      {m.context.length > 1 ? (
-        <section aria-label="Conversation around this message" className="thread">
-          <h4 style={{ marginBottom: 4 }}>In the conversation</h4>
-          {m.context.map((c) =>
+      {/* What surrounds this message: its reply chain, the chat in time order, or Nemotron's grouping. */}
+      <div className="seg" role="group" aria-label="Show around this message" style={{ marginTop: 8 }}>
+        <button
+          aria-pressed={around === 'chain'}
+          onClick={() => setAround('chain')}
+          title="What this message replies to and every reply to it (and replies to those): WhatsApp replies, and answers given without pressing Reply that Nemotron found"
+        >
+          Discussion{chainCount ? ` (${chainCount})` : ''}
+        </button>
+        <button aria-pressed={around === 'chatroom'} onClick={() => setAround('chatroom')} title="The chat in time order, as in WhatsApp: scroll up or down for more">
+          Chatroom
+        </button>
+        {m.thread ? (
+          <button aria-pressed={around === 'topic'} onClick={() => setAround('topic')} title="The messages Nemotron grouped into this message's discussion, wherever they are in the chat">
+            Topic thread
+          </button>
+        ) : null}
+      </div>
+      {around === 'chain' ? (
+        <section aria-label="Discussion: reply chain" className="thread thread-catalog">
+          {needsAnswers ? <p className="counts">{answersNote ?? 'NVIDIA Nemotron is finding which messages answer which (when Reply was not used)…'}</p> : null}
+          {m.reply_chain.before.length ? <div className="thread-label">Replied to, earliest first</div> : null}
+          {m.reply_chain.before.map((c) => (
+            <ChainItem key={c.message_id} c={c} tz={tz} onOpen={() => onOpenMessage(m.chat.id, c.message_id)} />
+          ))}
+          <div className={`tmsg current ${m.direction === 'outgoing' ? 'mine' : ''}`} aria-current="true">
+            <div className="meta">
+              <strong>{m.sender}</strong> · {time(m.sent_at, tz)} · this message
+            </div>
+            {m.body ?? m.marker ?? '(no text)'}
+          </div>
+          {m.reply_chain.after.length ? <div className="thread-label">Replies, in time order</div> : null}
+          {m.reply_chain.after.map((c) => (
+            <ChainItem key={c.message_id} c={c} tz={tz} onOpen={() => onOpenMessage(m.chat.id, c.message_id)} />
+          ))}
+          {!chainCount && !needsAnswers ? <p className="counts">No replies to or from this message, including answers given without Reply. See it in the Chatroom.</p> : null}
+        </section>
+      ) : around === 'chatroom' || !m.thread ? (
+        <Chatroom key={m.message_id} first={m.context} tz={tz} onOpen={(id) => onOpenMessage(m.chat.id, id)} />
+      ) : (
+        <section aria-label="The whole discussion" className="thread thread-catalog" ref={threadBox}>
+          {(() => {
+            const top = lead[0] ?? m.thread.before[0] ?? m.thread.messages[0];
+            return leadMore && top ? (
+              <button className="thread-label" onClick={() => void loadAround('before', top.message_id)}>
+                ↑ Load earlier messages
+              </button>
+            ) : (
+              <div className="thread-label">Start of the saved chat</div>
+            );
+          })()}
+          {lead.length || m.thread.before.length ? (
+            <>
+              <div className="thread-label">Earlier in the chat</div>
+              {[...lead, ...m.thread.before].map((c) => (
+                <div key={c.message_id} className={`tmsg earlier ${c.direction === 'outgoing' ? 'mine' : ''}`} {...openOnDoubleClick(() => onOpenMessage(m.chat.id, c.message_id))}>
+                  <div className="meta">
+                    <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
+                  </div>
+                  {c.snippet ?? '(removed)'}
+                </div>
+              ))}
+            </>
+          ) : null}
+          <h4 style={{ margin: '0 0 4px' }}>
+            Discussion: {m.thread.title} <span className="counts">· {m.thread.messages.length} messages</span>
+          </h4>
+          {needsAnswers ? <p className="counts">{answersNote ?? 'NVIDIA Nemotron is finding which messages answer which (when Reply was not used)…'}</p> : null}
+          {m.thread.messages.map((c) =>
             c.current ? (
               <div key={c.message_id} className={`tmsg current ${c.direction === 'outgoing' ? 'mine' : ''}`} aria-current="true">
                 <div className="meta">
                   <strong>{c.sender}</strong> · {time(c.sent_at, tz)} · this message
                 </div>
+                {c.reply_to ? <Quote q={c.reply_to} onOpen={() => onOpenMessage(m.chat.id, c.reply_to!.message_id)} /> : null}
+                {c.answers ? <Quote q={c.answers} inferred onOpen={() => onOpenMessage(m.chat.id, c.answers!.message_id)} /> : null}
                 {c.snippet ?? '(removed)'}
               </div>
             ) : (
-              <button key={c.message_id} className={`tmsg ${c.direction === 'outgoing' ? 'mine' : ''}`} onClick={() => onOpenMessage(m.chat.id, c.message_id)}>
+              <div
+                key={c.message_id}
+                className={`tmsg ${c.direction === 'outgoing' ? 'mine' : ''} ${c.filler ? 'filler' : ''}`}
+                {...openOnDoubleClick(() => onOpenMessage(m.chat.id, c.message_id))}
+                title={c.filler ? 'Small talk: kept here, left off the map. Double-click to open.' : 'Double-click to open. Select words to copy them.'}
+              >
                 <div className="meta">
                   <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
                 </div>
+                {c.reply_to ? <Quote q={c.reply_to} /> : null}
+                {c.answers ? <Quote q={c.answers} inferred /> : null}
                 {c.snippet ?? '(removed)'}
-              </button>
+              </div>
             ),
           )}
+          {tail.length ? <div className="thread-label">Later in the chat</div> : null}
+          {tail.map((c) => (
+            <div key={c.message_id} className={`tmsg earlier ${c.direction === 'outgoing' ? 'mine' : ''}`} {...openOnDoubleClick(() => onOpenMessage(m.chat.id, c.message_id))}>
+              <div className="meta">
+                <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
+              </div>
+              {c.snippet ?? '(removed)'}
+            </div>
+          ))}
+          {(() => {
+            const bottom = tail.at(-1) ?? m.thread.messages.at(-1);
+            return tailMore && bottom ? (
+              <button className="thread-label" onClick={() => void loadAround('after', bottom.message_id)}>
+                ↓ Load later messages
+              </button>
+            ) : (
+              <div className="thread-label">Latest saved message</div>
+            );
+          })()}
         </section>
-      ) : null}
+      )}
       <p className="counts">
         Permalink: <code>/chats/{m.chat.id}/messages/{m.message_id}</code>
       </p>
@@ -179,24 +423,18 @@ export function SourceView({ messageId, tz, dwellMs, autoRead, suppressed, onSup
   );
 }
 
-export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, onFilterTopic, onRevealPath, refreshKey }: { chatId: string; nodeId: string; filter: FilterState; onOpenMessage: (chatId: string, id: string) => void; onChanged: () => void; onFilterTopic: (id: string) => void; onRevealPath: (chatId: string, topicId: string) => void; refreshKey: number }) {
-  const [tab, setTab] = useState<'messages' | 'files' | 'related'>('messages');
+export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, refreshKey }: { chatId: string; nodeId: string; filter: FilterState; onOpenMessage: (chatId: string, id: string) => void; onChanged: () => void; refreshKey: number }) {
+  const [tab, setTab] = useState<'messages' | 'files'>('messages');
   const [data, setData] = useState<ContentResponse | null>(null);
   const [items, setItems] = useState<(ContentMessage | ContentFile)[]>([]);
   const [fullSummary, setFullSummary] = useState(false);
-  const [related, setRelated] = useState<RelatedItem[] | null>(null);
-  const [bulk, setBulk] = useState<{ id: string; count: number } | null>(null);
+  const [bulk, setBulk] = useState<{ id: string; count: number; filler: number } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const gen = useRef(0);
   const fp = JSON.stringify(filterParams(filter));
 
   const load = useCallback(
     async function loadPage(cursor?: string): Promise<void> {
-      if (tab === 'related') {
-        const r = await api<{ related: RelatedItem[] }>(`/api/related?${qs({ topic: nodeId })}`).catch(() => ({ related: [] }));
-        setRelated(r.related);
-        return;
-      }
       const my = ++gen.current;
       const r = await api<ContentResponse>(`/api/chats/${chatId}/nodes/${nodeId}/content?${qs({ ...filterParams(filter), tab, cursor, full_summary: fullSummary ? '1' : undefined })}`).catch((e: Error & { status?: number }) => {
         if (e.status === 409 && cursor) return null; // stale cursor → refetch from first page
@@ -231,8 +469,8 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
     void load();
   };
   const preview = async () => {
-    const r = await api<{ snapshotId: string; count: number }>(`/api/chats/${chatId}/bulk-preview`, { method: 'POST', json: { node_id: nodeId, filter: filterParams(filter) } });
-    setBulk({ id: r.snapshotId, count: r.count });
+    const r = await api<{ snapshotId: string; count: number; filler?: number }>(`/api/chats/${chatId}/bulk-preview`, { method: 'POST', json: { node_id: nodeId, filter: filterParams(filter) } });
+    setBulk({ id: r.snapshotId, count: r.count, filler: r.filler ?? 0 });
   };
   const execute = async (target: 'read' | 'missed') => {
     if (!bulk) return;
@@ -242,6 +480,7 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
     onChanged();
     void load();
   };
+  const srcNo = sourceNumbers(data?.summary?.claims.flatMap((c) => c.evidence.map((e) => e.m)) ?? []);
 
   return (
     <div>
@@ -253,25 +492,32 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
           {data ? <span className="counts"> · {data.matching_file_count} files · includes all deeper topics</span> : null}
         </div>
         <div className="tabs" role="tablist">
-          {(['messages', 'files', 'related'] as const).map((t) => (
+          {(['messages', 'files'] as const).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
-              {t === 'messages' ? 'Messages' : t === 'files' ? 'Files' : 'Related chats'}
+              {t === 'messages' ? 'Messages' : 'Files'}
             </button>
           ))}
         </div>
         <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button onClick={() => onFilterTopic(nodeId)}>Filter to this topic</button>
-          {bulk ? (
-            <>
-              <span className="pill">{bulk.count} messages in scope</span>
-              <button onClick={() => execute('read')}>Mark these {bulk.count} Read</button>
-              <button onClick={() => execute('missed')}>Mark Missed</button>
-              <button onClick={() => setBulk(null)}>Cancel</button>
-            </>
-          ) : (
-            <button onClick={preview}>Bulk review…</button>
-          )}
+          {bulk ? null : <button onClick={preview}>Bulk review…</button>}
         </div>
+        {/* Bulk review's own choices, set apart from the tabs above so they read as one step. */}
+        {bulk ? (
+          <div className="bulk-panel" role="group" aria-label="Bulk review">
+            <div className="bulk-title">Bulk review · this topic and everything beneath it</div>
+            <div className="counts">
+              {bulk.count.toLocaleString('en-US')} messages
+              {bulk.filler ? ` — the ones listed here plus ${bulk.filler.toLocaleString('en-US')} small-talk messages left off the map, so nothing stays Missed` : ''}
+            </div>
+            <div className="bulk-actions">
+              <button className="primary" onClick={() => execute('read')}>
+                Mark all {bulk.count.toLocaleString('en-US')} Read
+              </button>
+              <button onClick={() => execute('missed')}>Mark all Missed</button>
+              <button onClick={() => setBulk(null)}>Cancel</button>
+            </div>
+          </div>
+        ) : null}
         {note ? <div className="counts" role="status">{note}</div> : null}
       </div>
       <div className="dbody">
@@ -291,7 +537,9 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
                 {data.summary.claims.map((c) => (
                   <li key={c.id}>
                     {c.text}{' '}
-                    {c.evidence.map((e, i) => {
+                    {c.evidence.map((e) => {
+                      // One number per message across the summary: the same [n] always opens the same message.
+                      const i = srcNo.get(e.m)! - 1;
                       // The cited message, when it is in the list already loaded below.
                       const src = items.find((x): x is ContentMessage => !('attachment_id' in x) && x.message_id === e.m);
                       const tip = src ? `Source ${i + 1} — ${src.sender}: “${(src.snippet ?? '').slice(0, 160)}”. Click to open.` : `Source ${i + 1}: the message this point is based on. Click to open it.`;
@@ -308,49 +556,7 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
             )}
           </details>
         ) : null}
-        {tab === 'related' ? (
-          related === null ? (
-            <p>Loading…</p>
-          ) : related.length === 0 ? (
-            <p className="counts">No verified related topics in other chats.</p>
-          ) : (
-            related.map((l) => {
-              const other = l.a.topic_id === nodeId ? l.b : l.a;
-              const self = l.a.topic_id === nodeId ? l.a : l.b;
-              return (
-                <div key={l.link_id} className="msg">
-                  <div className="pill">{l.relation_type === 'SHARED_RESOURCE' ? 'Shared resource' : 'Related topic'}</div> {l.reason}
-                  <p className="path">
-                    {other.chat_title}: {pathText(other.path)}
-                  </p>
-                  <div className="counts">Evidence here:</div>
-                  {self.evidence.map((e) => (
-                    <button key={e.message_id} className="ctx" style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', background: 'none' }} onClick={() => onOpenMessage(self.chat_id, e.message_id)}>
-                      {e.sender}: {e.snippet}
-                    </button>
-                  ))}
-                  <div className="counts">Evidence in {other.chat_title}:</div>
-                  {other.evidence.map((e) => (
-                    <button key={e.message_id} className="ctx" style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', background: 'none' }} onClick={() => onOpenMessage(other.chat_id, e.message_id)}>
-                      {e.sender}: {e.snippet}
-                    </button>
-                  ))}
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={() => onRevealPath(other.chat_id, other.topic_id)}>Open topic in {other.chat_title}</button>
-                    <button
-                      onClick={async () => {
-                        await api(`/api/related/${l.link_id}/dismiss`, { method: 'POST' });
-                        void load();
-                      }}
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )
-        ) : items.length === 0 && data ? (
+        {items.length === 0 && data ? (
           <p className="counts">{filter.status === 'missed' ? 'All caught up here. Switch to All to view every message.' : 'No matching content.'}</p>
         ) : (
           items.map((it) =>
@@ -368,7 +574,7 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
               </div>
             ) : (
               <div key={it.message_id} className="msg msg-row">
-                <button className="msg-open" onClick={() => onOpenMessage(chatId, it.message_id)}>
+                <div className="msg-open" {...openOnDoubleClick(() => onOpenMessage(chatId, it.message_id))}>
                   <div>
                     <strong>{it.sender}</strong> <span className="counts">{it.sent_at ? new Date(it.sent_at).toLocaleString('en-SG', { timeZone: filter.tz }) : 'Unknown time'}</span>{' '}
                     <span className={it.review === 'missed' ? 'missed' : 'readbadge'}>{it.review === 'missed' ? '● Missed' : '✓ Read'}</span>
@@ -377,7 +583,7 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
                   </div>
                   <div>{it.snippet ?? '(no text)'}</div>
                   <div className="path">{it.topic_paths.map(pathText).join(' | ')}</div>
-                </button>
+                </div>
                 {/* Mark read straight from the list, without opening the message. */}
                 {it.review === 'missed' ? (
                   <button className="mark-read" aria-label={`Mark message from ${it.sender} as read`} onClick={() => void markRead(it)}>
@@ -388,7 +594,7 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, o
             ),
           )
         )}
-        {data?.next_cursor && tab !== 'related' ? <button onClick={() => load(data.next_cursor!)}>Load more</button> : null}
+        {data?.next_cursor ? <button onClick={() => load(data.next_cursor!)}>Load more</button> : null}
       </div>
     </div>
   );

@@ -25,6 +25,9 @@ import { createLocalStorage } from '../src/server/storage';
 import { ensurePrivateWorkspace } from '../src/server/workspace';
 import { createTestDb, createUser, type TestDb } from './helpers/db';
 
+// These tests cover related topics across chats, which are off by default.
+process.env.CROSS_CHAT_LINKS = '1';
+
 const bundle = loadFixtureBundle();
 const M = bundle.manifest;
 let t: TestDb;

@@ -95,6 +95,17 @@ export async function deleteChat(db: Db, workspaceId: string, chatId: string, pu
       .set({ ...(opts.keepAvatar ? {} : { avatarKey: null, avatarCheckedAt: null }), selected: false, excluded: true, deletionGeneration: c.deletionGeneration + 1, selectionEpoch: c.selectionEpoch + 1, sourceVersion: sql`${s.chats.sourceVersion} + 1`, graphVersion: sql`${s.chats.graphVersion} + 1`, taxonomyVersion: 0 })
       .where(eq(s.chats.id, chatId));
     await tx.execute(sql`UPDATE analysis_jobs SET status = 'cancelled' WHERE chat_id = ${chatId}::uuid AND status IN ('pending','running','budget_paused')`);
+    // Its one-sided maps ("Map from: You / Others") go entirely.
+    const sideMaps = await tx.select({ id: s.chats.id }).from(s.chats).where(eq(s.chats.mapOf, chatId));
+    for (const m of sideMaps) {
+      await tx.execute(sql`UPDATE analysis_jobs SET status = 'cancelled' WHERE chat_id = ${m.id}::uuid AND status IN ('pending','running','budget_paused')`);
+      await tx.execute(sql`DELETE FROM cross_chat_links WHERE a_chat_id = ${m.id}::uuid OR b_chat_id = ${m.id}::uuid`);
+      for (const table of ['summary_claims', 'analysis_units', 'taxonomy_frontiers', 'placements', 'discussions', 'topic_merge_map', 'taxonomy_overrides', 'user_chat_view_preferences']) {
+        await tx.execute(sql`DELETE FROM ${sql.identifier(table)} WHERE chat_id = ${m.id}::uuid`);
+      }
+      await deleteTopicsLeafFirst(tx, m.id);
+      await tx.delete(s.chats).where(eq(s.chats.id, m.id));
+    }
     const objs = await tx.execute<{ object_key: string }>(sql`SELECT a.object_key FROM attachments a JOIN messages m ON m.id = a.message_id WHERE m.chat_id = ${chatId}::uuid AND a.object_key IS NOT NULL`);
     // Purge derived and canonical content (cascade covers revisions/attachments/placements/reviews).
     await tx.execute(sql`DELETE FROM cross_chat_links WHERE a_chat_id = ${chatId}::uuid OR b_chat_id = ${chatId}::uuid`);

@@ -21,6 +21,8 @@ export const ExtractionSchema = z.object({
           .array(z.object({ text: z.string().min(1).max(400), evidence_refs: z.array(ref).min(1).max(8) }))
           .max(5),
         resource_refs: z.array(ref).max(40).default([]),
+        // Messages that add nothing on their own; they stay in the unit but not on the map.
+        filler_refs: z.array(ref).max(80).default([]),
         needs_review: z.boolean().default(false),
       }),
     )
@@ -83,6 +85,15 @@ export const AskSchema = z.object({
   topic_keys: z.array(z.string()).max(10).default([]),
 });
 
+/** Ask, second look: other names the chat uses for the same thing. */
+export const AliasSchema = z.object({ aliases: z.array(z.string().min(1).max(48)).max(8).default([]) });
+
+/** Root re-check: discussions to move to another root. */
+export const RootReviewSchema = z.object({ roots: z.array(z.object({ key: z.string().min(1).max(16), root: RootEnum })).max(200).default([]) });
+
+/** Answers given without WhatsApp's Reply: each links a message to the earlier one it answers. */
+export const AnswersSchema = z.object({ links: z.array(z.object({ ref: ref, answers: ref })).max(200).default([]) });
+
 /** Answer: a direct reply to an Ask question, each point citing the messages or discussions it comes from. */
 export const AnswerSchema = z.object({
   answer: z.string().max(1500),
@@ -103,6 +114,9 @@ export const SplitSchema = z.object({
     .default([]),
 });
 
+/** Filler screening: refs of messages that add nothing on their own. */
+export const FillerSchema = z.object({ filler: z.array(ref).max(400).default([]) });
+
 /** JSON Schemas (subset) for providers that support schema-constrained output. */
 export const JSON_SCHEMAS: Record<string, Record<string, unknown>> = {
   extraction: z.toJSONSchema(ExtractionSchema) as Record<string, unknown>,
@@ -115,4 +129,8 @@ export const JSON_SCHEMAS: Record<string, Record<string, unknown>> = {
   answer: z.toJSONSchema(AnswerSchema) as Record<string, unknown>,
   regroup: z.toJSONSchema(RegroupSchema) as Record<string, unknown>,
   split: z.toJSONSchema(SplitSchema) as Record<string, unknown>,
+  filler: z.toJSONSchema(FillerSchema) as Record<string, unknown>,
+  alias: z.toJSONSchema(AliasSchema) as Record<string, unknown>,
+  answers: z.toJSONSchema(AnswersSchema) as Record<string, unknown>,
+  roots: z.toJSONSchema(RootReviewSchema) as Record<string, unknown>,
 };

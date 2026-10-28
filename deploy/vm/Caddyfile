@@ -1,0 +1,8 @@
+# HTTPS for ThreadMap: Caddy obtains a certificate for DOMAIN and forwards to the app.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy app:3000 {
+		# Live updates (server-sent events) must not be buffered.
+		flush_interval -1
+	}
+}

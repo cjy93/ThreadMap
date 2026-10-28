@@ -69,7 +69,6 @@ export function OutlineView({ map, selectedId, onOpen, onExpand }: { map: MapRes
             >
               <span className="marker" aria-hidden style={{ width: 6 + (n.diameter ?? 0) / maxD * 12, height: 6 + (n.diameter ?? 0) / maxD * 12 }} />
               <span className="t">
-                {n.kind === 'DISCUSSION' ? '💬 ' : ''}
                 {n.title}
               </span>
               <span className="counts">
