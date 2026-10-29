@@ -380,7 +380,8 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
   position: absolute; top: 64px; right: 12px; bottom: 56px; z-index: 10; width: min(380px, calc(100% - 24px)); overflow: auto;
   padding: 14px 16px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: 0 12px 32px var(--glass-shadow);
 }
-.study-panel h3 { margin: 2px 0 8px; font-size: 18px; }
+.study-panel h3 { margin: 2px 0 8px; font-size: 18px; padding-right: 36px; }
+.study-panel-close { position: sticky; top: 0; float: right; margin: -4px -6px 0 8px; padding: 2px 9px; border-radius: 999px; }
 .study-panel .ctype { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
 .study-links { padding-left: 18px; font-size: 13px; }
 .study-links button { padding: 0; border: none; background: none; color: var(--accent); text-decoration: underline; }

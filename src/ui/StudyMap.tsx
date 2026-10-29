@@ -143,7 +143,8 @@ function Cites({ messages, web, map, sources, numberOf, onOpenMessage }: { messa
 function MapPane({ map, sources, numberOf, onOpenMessage }: { map: StudyMap; sources: Record<string, StudySource>; numberOf: Map<string, number>; onOpenMessage: (chatId: string, id: string) => void }) {
   const rf = useReactFlow();
   const layout = useMemo(() => layoutStudyMap(map), [map]);
-  const [picked, setPicked] = useState(layout.coreKey);
+  // The concept whose card is open; null when the card is closed (✕ or a click on empty space).
+  const [picked, setPicked] = useState<string | null>(layout.coreKey);
   const nodes: Node<SData>[] = map.concepts.map((c) => {
     const p = layout.pos.get(c.key)!;
     return {
@@ -161,12 +162,15 @@ function MapPane({ map, sources, numberOf, onOpenMessage }: { map: StudyMap; sou
   const labelOf = (k: string) => map.concepts.find((x) => x.key === k)?.label ?? k;
   return (
     <>
-      <ReactFlow nodes={nodes} edges={layout.edges} nodeTypes={nodeTypes} nodesConnectable={false} zoomOnDoubleClick={false} minZoom={0.1} maxZoom={2} proOptions={{ hideAttribution: true }}>
+      <ReactFlow nodes={nodes} edges={layout.edges} nodeTypes={nodeTypes} nodesConnectable={false} zoomOnDoubleClick={false} onPaneClick={() => setPicked(null)} minZoom={0.1} maxZoom={2} proOptions={{ hideAttribution: true }}>
         <Background gap={24} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
       {c ? (
         <aside className="study-panel" aria-label="Concept">
+          <button className="study-panel-close" aria-label="Close this card" title="Close (click any concept to open its card again)" onClick={() => setPicked(null)}>
+            ✕
+          </button>
           <div className="ctype">{KIND_LABEL[c.kind]}</div>
           <h3>{c.label}</h3>
           <p>{c.explanation || 'No explanation given.'}</p>
