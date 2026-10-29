@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar } from './Avatar';
-import { ChecklistArt, JourneyStep, MindMapArt, PhoneArt } from './ConnectJourney';
+import { ChecklistArt, JourneyNav, JourneyStep, MindMapArt, PhoneArt } from './ConnectJourney';
 import { api, leaveAndDeleteAccount } from './client';
 
 interface Status {
@@ -256,6 +256,13 @@ export function ConnectPanel({
             Leaving works like <em>Disconnect and delete my data</em>: the device is logged out of WhatsApp and every stored message, map and file is deleted.
           </p>
         </details>
+        <JourneyNav
+          steps={[
+            { n: 1, label: 'Link', state: stateOf(1) },
+            { n: 2, label: 'Choose', state: stateOf(2) },
+            { n: 3, label: 'Map', state: stateOf(3) },
+          ]}
+        />
       </header>
 
       <ol className="journey">

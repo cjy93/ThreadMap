@@ -554,9 +554,9 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
  * line-art drawing that draws itself in (ConnectJourney.tsx). Our own CSS and SVG.
  * ------------------------------------------------------------------------- */
 .connect-page { max-width: 1040px; margin: 8px auto 40px; padding: 0 8px; }
-.connect-hero { text-align: center; max-width: 680px; margin: 18px auto 8px; }
-.connect-hero h2 { font-size: clamp(30px, 5vw, 46px); margin: 6px 0 10px; }
-.connect-hero .lede { font-size: 17px; color: var(--text-2); margin: 0 0 12px; }
+.connect-hero { text-align: center; max-width: 680px; margin: 10px auto 4px; }
+.connect-hero h2 { font-size: clamp(28px, 4.4vw, 40px); margin: 4px 0 6px; }
+.connect-hero .lede { font-size: 16px; color: var(--text-2); margin: 0 0 8px; }
 .jkicker { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.32em; font-size: 13px; color: var(--knowledge); }
 .leave-note { font-size: 13px; color: var(--muted); margin: 0 auto 8px; }
 .leave-note strong { color: var(--accent); }
@@ -565,7 +565,7 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .fine-print summary::before { content: '▸ '; }
 .fine-print[open] summary::before { content: '▾ '; }
 
-.journey { list-style: none; margin: 26px 0 10px; padding: 0; position: relative; }
+.journey { list-style: none; margin: 12px 0 6px; padding: 0; position: relative; }
 /* The line: a soft glowing gradient that draws down the page. */
 .journey::before {
   content: ''; position: absolute; left: 50%; top: 8px; bottom: 8px; width: 2px; transform: translateX(-50%) scaleY(0); transform-origin: top;
@@ -574,7 +574,7 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 }
 @keyframes jline { to { transform: translateX(-50%) scaleY(1); } }
 
-.jstep { display: grid; grid-template-columns: 1fr 72px 1fr; align-items: center; padding: 34px 0; position: relative; }
+.jstep { display: grid; grid-template-columns: 1fr 72px 1fr; align-items: center; padding: 16px 0; position: relative; scroll-margin-top: 12px; }
 .jstep .jtext { grid-row: 1; opacity: 0; transform: translateY(14px); transition: opacity 0.7s ease, transform 0.7s ease; }
 .jstep .jvisual { grid-row: 1; display: grid; place-items: center; opacity: 0; transition: opacity 0.9s 0.15s ease; }
 .jstep.in .jtext, .jstep.in .jvisual { opacity: 1; transform: none; }
@@ -588,14 +588,15 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 @keyframes jpulse { 50% { box-shadow: 0 0 0 11px color-mix(in srgb, var(--knowledge) 12%, transparent), 0 0 30px var(--knowledge); } }
 .jstep-later .jtext { opacity: 0.55; }
 .jstep-later.in .jtext { opacity: 0.6; }
-.jstep h3 { font-size: clamp(24px, 3.2vw, 34px); margin: 6px 0 10px; }
+.jstep h3 { font-size: clamp(22px, 2.8vw, 30px); margin: 4px 0 6px; }
 .jstep .jlede { font-size: 15px; color: var(--text-2); line-height: 1.6; }
 .jstep .jstatus { margin: 0 0 6px; }
 .jstep .jtech { font-size: 11px; opacity: 0.75; }
 .jstep-left .jactions, .jstep-left .phone-link { justify-content: flex-end; }
 .jactions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .jstep-left .jactions { justify-content: flex-end; }
-.jwide { grid-column: 1 / -1; grid-row: 2; margin-top: 22px; padding: 14px; border-radius: 16px; background: var(--panel); border: 1px solid var(--border); position: relative; z-index: 1; }
+/* The chat list scrolls in its own box (filters pinned on top), so step 3 follows right after it. */
+.jwide { grid-column: 1 / -1; grid-row: 2; margin-top: 12px; padding: 0 14px 10px; border-radius: 16px; background: var(--panel); border: 1px solid var(--border); position: relative; z-index: 1; max-height: min(52vh, 440px); overflow: auto; overscroll-behavior: contain; }
 .jwide table th, .jwide table td { padding: 6px 4px; border-bottom: 1px solid var(--border); }
 
 /* The live QR, framed like a screen with glowing corners; it stays black on white to scan. */
@@ -607,7 +608,7 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .qr-wait { width: 260px; height: 260px; display: grid; place-items: center; border: 1px dashed var(--border-strong); border-radius: 8px; }
 
 /* Line art that draws itself once its step is in view. */
-.jart { width: min(260px, 100%); height: auto; overflow: visible; }
+.jart { width: min(200px, 100%); height: auto; overflow: visible; }
 .jart * { fill: none; stroke: var(--knowledge); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
 .jart .acc { stroke: var(--accent); }
 .jart .pink { stroke: var(--italic); }
@@ -644,3 +645,11 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
   .jart *, .jstep.in .jart * { animation: none !important; stroke-dashoffset: 0; }
   .jvisual .jart, .jstep-now .jdot { animation: none; }
 }
+/* The three steps at a glance, under the title. */
+.jnav { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
+.jnav a { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); text-decoration: none; font-size: 13px; }
+.jnav-n { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; letter-spacing: 0.1em; color: var(--knowledge); }
+.jnav a.jnav-done .jnav-n { color: var(--read); }
+.jnav a.jnav-now { border-color: var(--knowledge); color: var(--text); box-shadow: 0 0 16px color-mix(in srgb, var(--knowledge) 35%, transparent); }
+.jnav a.jnav-later { opacity: 0.6; }
+.jnav a:hover { border-color: var(--border-strong); }

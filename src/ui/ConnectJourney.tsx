@@ -49,7 +49,7 @@ export function JourneyStep({
 }) {
   const [ref, seen] = useInView<HTMLLIElement>();
   return (
-    <li ref={ref} className={`jstep jstep-${side} jstep-${state} ${seen ? 'in' : ''}`} aria-current={state === 'now' ? 'step' : undefined}>
+    <li ref={ref} id={`step-${n}`} className={`jstep jstep-${side} jstep-${state} ${seen ? 'in' : ''}`} aria-current={state === 'now' ? 'step' : undefined}>
       <div className="jtext">
         <div className="jkicker">
           {String(n).padStart(2, '0')} · {kicker}
@@ -61,6 +61,19 @@ export function JourneyStep({
       <div className="jvisual">{visual}</div>
       {wide ? <div className="jwide">{wide}</div> : null}
     </li>
+  );
+}
+
+/** The three steps at a glance under the title; each jumps to its step. */
+export function JourneyNav({ steps }: { steps: { n: number; label: string; state: 'done' | 'now' | 'later' }[] }) {
+  return (
+    <nav className="jnav" aria-label="Steps">
+      {steps.map((s) => (
+        <a key={s.n} href={`#step-${s.n}`} className={`jnav-${s.state}`} aria-current={s.state === 'now' ? 'step' : undefined}>
+          <span className="jnav-n">{s.state === 'done' ? '✓' : String(s.n).padStart(2, '0')}</span> {s.label}
+        </a>
+      ))}
+    </nav>
   );
 }
 
