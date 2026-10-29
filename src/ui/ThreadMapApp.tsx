@@ -93,6 +93,11 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
   // The current search's parameters, to fetch further pages of its matches as the list scrolls.
   const askParamsRef = useRef<Record<string, string | undefined> | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  // Chips under Nemotron's reading picked to narrow the list, and that narrowed list.
+  const [chipSel, setChipSel] = useState<string[]>([]);
+  const [chipRes, setChipRes] = useState<SearchResult | null>(null);
+  // Each chip click supersedes the last: a slower earlier filter never lands over a newer one.
+  const chipGen = useRef(0);
   const moreRef = useRef<HTMLDivElement | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   // The question being searched right now (null when idle). A new question may be asked at any
@@ -342,6 +347,9 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
       return setSearchRes(null);
     }
     const my = ++askGen.current;
+    chipGen.current++;
+    setChipSel([]);
+    setChipRes(null);
     setStarred(null);
     setSmallTalk(null);
     setAsking(query);
@@ -388,26 +396,48 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
       if (my === askGen.current) setAnswer({ state: 'none', note: (err as Error).message });
     }
   };
-  // The next page of matches, with the same terms and topics (no new model call).
-  const nextOffset = searchRes?.next_offset ?? null;
+  // The list shown: every match, or only those with the chips picked under Nemotron's reading.
+  const filtering = chipSel.length > 0;
+  const listRes = filtering ? chipRes : searchRes;
+  const shownResults = listRes?.results ?? [];
+  // A page of matches with the given words (no new model call); topics only for the full list.
+  const fetchPage = useCallback(
+    (terms: string[], topics: string[], offset: number) =>
+      api<SearchResult>(`/api/ask?${qs({ ...askParamsRef.current, terms_json: JSON.stringify(terms), topics: topics.join(','), offset: String(offset) })}`),
+    [],
+  );
+  const toggleChip = async (term: string) => {
+    if (!searchRes || !askParamsRef.current) return;
+    const next = chipSel.includes(term) ? chipSel.filter((t) => t !== term) : [...chipSel, term];
+    setChipSel(next);
+    setChipRes(null);
+    const mine = ++chipGen.current;
+    if (!next.length) return;
+    const my = askGen.current;
+    const r = await fetchPage(next, [], 0).catch(() => null);
+    // Only if the question and the picked chips are still the same.
+    if (r && my === askGen.current && mine === chipGen.current) setChipRes(r);
+  };
+  // The next page of the shown list, with the same words and topics (no new model call).
+  const nextOffset = listRes?.next_offset ?? null;
   const loadMore = useCallback(async () => {
-    if (nextOffset === null || loadingMore || !searchRes || !askParamsRef.current) return;
+    if (nextOffset === null || loadingMore || !listRes || !searchRes || !askParamsRef.current) return;
     const my = askGen.current;
     setLoadingMore(true);
     try {
-      const more = await api<SearchResult>(
-        `/api/ask?${qs({ ...askParamsRef.current, terms_json: JSON.stringify(searchRes.terms), topics: searchRes.topics.map((t) => t.topic_id).join(','), offset: String(nextOffset) })}`,
-      );
+      const more = await fetchPage(filtering ? chipSel : searchRes.terms, filtering ? [] : searchRes.topics.map((t) => t.topic_id), nextOffset);
       if (my !== askGen.current) return;
-      setSearchRes((cur) => {
+      const add = (cur: SearchResult | null) => {
         if (!cur) return cur;
         const seen = new Set(cur.results.map((r) => r.message_id));
         return { ...cur, results: [...cur.results, ...more.results.filter((r) => !seen.has(r.message_id))], total: more.total, next_offset: more.next_offset };
-      });
+      };
+      if (filtering) setChipRes(add);
+      else setSearchRes(add);
     } finally {
       setLoadingMore(false);
     }
-  }, [nextOffset, loadingMore, searchRes]);
+  }, [nextOffset, loadingMore, listRes, searchRes, filtering, chipSel, fetchPage]);
   // Reaching the end of the list loads the next page.
   useEffect(() => {
     const el = moreRef.current;
@@ -491,9 +521,10 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
     <div className={`shell ${navHidden ? 'nav-hidden' : ''} ${headFolded || (searchRes && conceptMap) ? 'head-folded' : ''}`}>
       <nav className="left" id="chat-list" aria-label="Conversations" aria-hidden={navHidden} inert={navHidden}>
         <div className="left-head">
-          <span className="brand">
+          {/* Home: the landing page (?home=1, since signed-in visitors are otherwise sent back here). */}
+          <a href="/?home=1" className="brand" title="ThreadMap home" style={{ textDecoration: 'none', color: 'inherit' }}>
             Thread<em>Map</em>
-          </span>
+          </a>
           <span style={{ display: 'flex', gap: 4 }}>
             <ThemeToggle />
             {mode === 'demo' && ownAccount ? (
@@ -994,9 +1025,15 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
                       </div>
                       <div className="terms">
                         {h.words.map((w) => (
-                          <span key={w.word} className="pill word-hit" title={`${w.messages} message${w.messages === 1 ? '' : 's'}`}>
+                          <button
+                            key={w.word}
+                            className="pill word-hit chip-toggle"
+                            aria-pressed={chipSel.includes(w.word)}
+                            title={`${w.messages} message${w.messages === 1 ? '' : 's'} · click to show only messages with it`}
+                            onClick={() => void toggleChip(w.word)}
+                          >
                             {w.word} <span className="counts">· {w.messages}</span>
-                          </span>
+                          </button>
                         ))}
                       </div>
                     </div>
@@ -1004,12 +1041,31 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
                 {searchRes.terms.length ? (
                   <div className="terms">
                     {searchRes.terms.map((t) => (
-                      <span key={t} className="pill">
+                      <button key={t} className="pill chip-toggle" aria-pressed={chipSel.includes(t)} title="Click to show only messages with it" onClick={() => void toggleChip(t)}>
                         {t}
-                      </span>
+                      </button>
                     ))}
                   </div>
                 ) : null}
+                <div className="counts chip-note">
+                  {filtering ? (
+                    <>
+                      Showing only messages with: <strong>{chipSel.join(', ')}</strong> ·{' '}
+                      <button
+                        className="linklike"
+                        onClick={() => {
+                          chipGen.current++;
+                          setChipSel([]);
+                          setChipRes(null);
+                        }}
+                      >
+                        Clear filter
+                      </button>
+                    </>
+                  ) : (
+                    'Click words above to show only the messages with them.'
+                  )}
+                </div>
               </div>
               {answer ? (
                 <div className="bubble answer" aria-live="polite">
@@ -1044,24 +1100,26 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
                   )}
                 </div>
               ) : null}
-              {searchRes.topics.length ? <div className="ask-section">Topics · {searchRes.topics.length}</div> : null}
-              {searchRes.topics.map((t) => (
+              {!filtering && searchRes.topics.length ? <div className="ask-section">Topics · {searchRes.topics.length}</div> : null}
+              {(filtering ? [] : searchRes.topics).map((t) => (
                 <button key={t.topic_id} className="msg ask-topic" onClick={() => onRevealPath(t.chat_id, t.topic_id)}>
                   Topic: {t.path.map((p) => p.title).join(' › ')}
                 </button>
               ))}
-              {searchRes.results.length ? (
+              {filtering && !chipRes ? <p className="counts">Filtering…</p> : null}
+              {shownResults.length ? (
                 <div className="ask-section">
                   From your chats ·{' '}
-                  {searchRes.total && searchRes.total > searchRes.results.length
-                    ? `${searchRes.results.length} of ${searchRes.total.toLocaleString('en-US')} messages`
-                    : `${searchRes.results.length} message${searchRes.results.length === 1 ? '' : 's'}`}{' '}
+                  {listRes?.total && listRes.total > shownResults.length
+                    ? `${shownResults.length} of ${listRes.total.toLocaleString('en-US')} messages`
+                    : `${shownResults.length} message${shownResults.length === 1 ? '' : 's'}`}{' '}
+                  {filtering ? `with ${chipSel.join(', ')} ` : ''}
                   · exact, then partial, then by meaning · double-click to open
                 </div>
               ) : null}
-              {searchRes.results.map((r, i) => (
+              {shownResults.map((r, i) => (
                 <div key={r.message_id}>
-                {r.match && r.match !== searchRes.results[i - 1]?.match ? (
+                {r.match && r.match !== shownResults[i - 1]?.match ? (
                   <div className="ask-tier">{{ exact: 'Exact match', partial: `Contains “${searchRes.query.trim()}” inside a word`, meaning: 'Related by meaning' }[r.match]}</div>
                 ) : null}
                 <div className="msg ask-hit" {...openOnDoubleClick(() => onOpenMessage(r.chat_id, r.message_id))}>
@@ -1085,11 +1143,11 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
               {nextOffset !== null ? (
                 <div ref={moreRef} className="ask-more">
                   <button disabled={loadingMore} onClick={() => void loadMore()}>
-                    {loadingMore ? 'Loading more…' : `Load more (${((searchRes.total ?? 0) - searchRes.results.length).toLocaleString('en-US')} left)`}
+                    {loadingMore ? 'Loading more…' : `Load more (${((listRes?.total ?? 0) - shownResults.length).toLocaleString('en-US')} left)`}
                   </button>
                 </div>
               ) : null}
-              {!searchRes.results.length && !searchRes.topics.length ? <p className="counts">No matches under the current filters.</p> : null}
+              {listRes && !shownResults.length && (filtering || !searchRes.topics.length) ? <p className="counts">{filtering ? 'No messages with these words.' : 'No matches under the current filters.'}</p> : null}
             </div>
           ) : selectedNode && chatId ? (
             <NodeDrawer

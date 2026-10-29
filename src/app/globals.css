@@ -702,3 +702,7 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .orbit-card.card-orange { border-left-color: var(--accent); }
 @keyframes os-card { from { opacity: 0; transform: translateY(6px); } }
 @media (prefers-reduced-motion: reduce) { .orbit-card { animation: none; } }
+/* Ask: the reading's chips narrow the list when picked. */
+.chip-toggle { cursor: pointer; font: inherit; font-size: 13px; }
+.chip-toggle[aria-pressed='true'] { background: var(--knowledge); border-color: var(--knowledge); color: var(--accent-ink); }
+.chip-note { margin-top: 8px; }
