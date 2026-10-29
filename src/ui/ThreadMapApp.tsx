@@ -914,8 +914,18 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
               ))}
               {searchRes.results.map((r) => (
                 <div key={r.message_id} className="msg" {...openOnDoubleClick(() => onOpenMessage(r.chat_id, r.message_id))}>
+                  {r.context?.before ? (
+                    <div className="ask-ctx">
+                      ↑ {r.context.before.rel} · <strong>{r.context.before.sender}</strong>: {r.context.before.text}
+                    </div>
+                  ) : null}
                   <strong>{r.sender}</strong> <span className={r.review === 'missed' ? 'missed' : 'readbadge'}>{r.review}</span>
                   <div>{r.snippet}</div>
+                  {r.context?.after ? (
+                    <div className="ask-ctx">
+                      ↓ {r.context.after.rel} · <strong>{r.context.after.sender}</strong>: {r.context.after.text}
+                    </div>
+                  ) : null}
                   <div className="path">{r.topic_paths.map((p) => p.map((x) => x.title).join(' › ')).join(' | ')}</div>
                 </div>
               ))}

@@ -93,6 +93,52 @@ const termMatchSql = (t: ReturnType<typeof sql>, p: ReturnType<typeof sql>) => s
   OR EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id AND lower(a.ai_description) LIKE ${p}))`;
 const likePattern = (t: string) => `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
+// A word the owner typed outweighs the variants Nemotron adds: asked "Clip", the messages
+// saying "LiceClip" must not be pushed out by ones matching many added hackathon terms.
+const TYPED_TERM_WEIGHT = 5;
+
+export interface ContextLine {
+  sender: string;
+  text: string;
+  /** How it relates to the matched message. */
+  rel: 'replying to' | 'before' | 'reply' | 'after';
+}
+
+/**
+ * What surrounds each message, so a bare "LiceClip" says what it was about: the message
+ * it replies to (or else the one just before) and the first reply to it (or else the one
+ * just after). Small talk is skipped as a neighbour; an empty side is left out.
+ */
+export async function messageContext(db: Db, ids: string[]): Promise<Map<string, { before?: ContextLine; after?: ContextLine }>> {
+  const out = new Map<string, { before?: ContextLine; after?: ContextLine }>();
+  if (!ids.length) return out;
+  const usable = sql`p.chat_id = m.chat_id AND p.id <> m.id AND p.state = 'active' AND coalesce(p.body, '') <> ''`;
+  const rows = await db.execute<{ id: string; b_sender: string | null; b_body: string | null; b_rel: string | null; a_sender: string | null; a_body: string | null; a_rel: string | null }>(sql`
+    SELECT m.id, bf.sender_label AS b_sender, bf.body AS b_body, bf.rel AS b_rel, af.sender_label AS a_sender, af.body AS a_body, af.rel AS a_rel
+    FROM messages m
+    LEFT JOIN LATERAL (
+      SELECT x.sender_label, x.body, x.rel FROM (
+        (SELECT p.sender_label, p.body, 'replying to' AS rel, 0 AS o FROM messages p
+          WHERE ${usable} AND (p.id = m.inferred_reply_to OR (m.reply_to_native_id IS NOT NULL AND p.native_id = m.reply_to_native_id)) LIMIT 1)
+        UNION ALL
+        (SELECT p.sender_label, p.body, 'before', 1 FROM messages p
+          WHERE ${usable} AND p.filler IS NOT TRUE AND p.sent_at < m.sent_at ORDER BY p.sent_at DESC LIMIT 1)
+      ) x ORDER BY x.o LIMIT 1) bf ON true
+    LEFT JOIN LATERAL (
+      SELECT x.sender_label, x.body, x.rel FROM (
+        (SELECT p.sender_label, p.body, 'reply' AS rel, 0 AS o FROM messages p
+          WHERE ${usable} AND (p.inferred_reply_to = m.id OR p.reply_to_native_id = m.native_id) ORDER BY p.sent_at LIMIT 1)
+        UNION ALL
+        (SELECT p.sender_label, p.body, 'after', 1 FROM messages p
+          WHERE ${usable} AND p.filler IS NOT TRUE AND p.sent_at > m.sent_at ORDER BY p.sent_at LIMIT 1)
+      ) x ORDER BY x.o LIMIT 1) af ON true
+    WHERE m.id IN (${sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `)})`);
+  const line = (sender: string | null, body: string | null, rel: string | null): ContextLine | undefined =>
+    sender !== null && body ? { sender, text: body.slice(0, 200), rel: rel as ContextLine['rel'] } : undefined;
+  for (const r of rows.rows) out.set(r.id, { before: line(r.b_sender, r.b_body, r.b_rel), after: line(r.a_sender, r.a_body, r.a_rel) });
+  return out;
+}
+
 /**
  * Other names for what is asked about: Nano reads the messages that mention it
  * and lists the renames, codenames and spellings they use ("davinci = Elucidex").
@@ -205,13 +251,14 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   if (!chatIds.length || (!terms.length && !topicIds.length)) return { query: question, interpretation, note, interpretation_pending: pending, terms, results: [], topics: [] };
 
   const matching = matchingMessagesSql({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds }, filter);
-  const termValues = terms.length ? sql.join(terms.map((t) => sql`(${t}, ${likePattern(t)})`), sql`, `) : sql`(NULL::text, NULL::text)`;
+  const typed = new Set(normalizeSearch(question).split(/\s+/));
+  const termValues = terms.length ? sql.join(terms.map((t) => sql`(${t}, ${likePattern(t)}, ${typed.has(t) ? TYPED_TERM_WEIGHT : 1}::int)`), sql`, `) : sql`(NULL::text, NULL::text, 0)`;
   const topicArray = topicIds.length ? sql`ARRAY[${sql.join(topicIds.map((id) => sql`${id}::uuid`), sql`, `)}]` : sql`ARRAY[]::uuid[]`;
   const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; sent_at: Date | null; is_read: boolean; content_revision: number; score: number }>(sql`
-    WITH mt AS (${matching}), terms(t, p) AS (VALUES ${termValues}),
+    WITH mt AS (${matching}), terms(t, p, w) AS (VALUES ${termValues}),
     scored AS (
       SELECT m.id,
-        (SELECT count(*) FROM terms WHERE terms.p IS NOT NULL AND ${termMatchSql(sql`terms.t`, sql`terms.p`)})::int
+        (SELECT coalesce(sum(terms.w), 0) FROM terms WHERE terms.p IS NOT NULL AND ${termMatchSql(sql`terms.t`, sql`terms.p`)})::int
         + CASE WHEN EXISTS (SELECT 1 FROM placements pl WHERE pl.message_id = m.id AND pl.topic_id = ANY(${topicArray})) THEN 2 ELSE 0 END AS score
       FROM messages m JOIN mt ON mt.id = m.id)
     SELECT m.id, m.chat_id, m.sender_label, m.body, m.sent_at, mt.is_read, m.content_revision, scored.score
@@ -219,6 +266,7 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
     WHERE scored.score > 0
     ORDER BY scored.score DESC, m.sent_at DESC NULLS LAST, m.id DESC LIMIT 100`);
 
+  const context = await messageContext(db, rows.rows.map((r) => r.id));
   const placementRows = rows.rows.length
     ? await db.select({ messageId: s.placements.messageId, topicId: s.placements.topicId }).from(s.placements).where(inArray(s.placements.messageId, rows.rows.map((r) => r.id)))
     : [];
@@ -245,6 +293,7 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
         score: r.score,
         topic_paths: placementRows.filter((p) => p.messageId === r.id && trees.get(r.chat_id)?.nodes.has(p.topicId)).map((p) => pathOf(trees.get(r.chat_id)!, p.topicId)),
         route: `/chats/${r.chat_id}/messages/${r.id}`,
+        context: context.get(r.id) ?? {},
       };
     }),
     // The topics the model judged relevant.
@@ -293,6 +342,8 @@ export async function answerQuestion(
   // What the vision model saw counts as message text.
   const seen = rows.length ? await db.select({ messageId: s.attachments.messageId, desc: s.attachments.aiDescription }).from(s.attachments).where(inArray(s.attachments.messageId, rows.map((r) => r.id))) : [];
   const descOf = new Map(seen.filter((a) => a.desc).map((a) => [a.messageId, a.desc!]));
+  // The messages around each match, so a short reply or a bare name can be understood.
+  const around = await messageContext(db, rows.map((r) => r.id));
   const units = await db
     .select({ chatId: s.analysisUnits.chatId, meta: s.analysisUnits.summaryBullets, terms: s.analysisUnits.topicTerms, refs: s.analysisUnits.messageRefs })
     .from(s.analysisUnits)
@@ -308,7 +359,9 @@ export async function answerQuestion(
   let used = base;
   for (const r of rows) {
     const text = [r.body ?? '', descOf.get(r.id) ? `[image: ${descOf.get(r.id)}]` : ''].filter(Boolean).join(' ').slice(0, 400);
-    const m = { ref: `m${messages.length + 1}`, chat: titleOf.get(r.chatId)!, sender: r.sender, time: r.sentAt ? r.sentAt.toISOString().slice(0, 16) : null, text };
+    const ctx = around.get(r.id);
+    const context = [ctx?.before, ctx?.after].filter((c): c is ContextLine => !!c).map((c) => `(${c.rel}) ${c.sender}: ${c.text.slice(0, 160)}`);
+    const m = { ref: `m${messages.length + 1}`, chat: titleOf.get(r.chatId)!, sender: r.sender, time: r.sentAt ? r.sentAt.toISOString().slice(0, 16) : null, text, ...(context.length ? { context } : {}) };
     // The matches take at most half of the first part; the summaries need the rest.
     if (used + cost(m) > base + limit / 2) break;
     used += cost(m);

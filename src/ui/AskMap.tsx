@@ -24,6 +24,12 @@ import {
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { PathItem } from './types';
 
+export interface AskContextLine {
+  sender: string;
+  text: string;
+  rel: 'replying to' | 'before' | 'reply' | 'after';
+}
+
 export interface AskResult {
   query: string;
   interpretation: string | null;
@@ -32,7 +38,16 @@ export interface AskResult {
   /** Nemotron is still reading the question: search again with ?interp=<this> once it has. */
   interpretation_pending?: string | null;
   terms: string[];
-  results: { message_id: string; chat_id: string; sender: string; snippet: string; review: string; topic_paths: PathItem[][] }[];
+  results: {
+    message_id: string;
+    chat_id: string;
+    sender: string;
+    snippet: string;
+    review: string;
+    topic_paths: PathItem[][];
+    /** The messages around it: the one it replies to (or the one before), the reply (or the one after). */
+    context?: { before?: AskContextLine; after?: AskContextLine };
+  }[];
   topics: { chat_id: string; topic_id: string; path: PathItem[] }[];
 }
 
