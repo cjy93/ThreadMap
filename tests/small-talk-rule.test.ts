@@ -9,8 +9,22 @@ import { createTestDb, createUser, type TestDb } from './helpers/db';
 
 // "Done" and "Thank you" stayed on the map: the model kept "Done" as the answer to a request.
 // Courtesy-only messages are now small talk by rule; anything with real content is not.
-const SMALL = ['Done', 'Thank you!', 'thank u', 'ok noted 👍', 'Done ah', 'hahaha', '👍', 'Thanks so much!!', 'ok ok', 'Received, thanks'];
-const CONTENT = ['Mind adding dhui@nvidia.com too please thank you', 'Can access now, thanks!', 'yes', 'no', 'sure', 'okay see you at 3', 'Done: https://x.y/z', 'Thanks, the slides are uploaded', ''];
+const SMALL = ['Done', 'Thank you!', 'thank u', 'ok noted 👍', 'Done ah', 'hahaha', '👍', 'Thanks so much!!', 'ok ok', 'Received, thanks', 'you know you are right', 'You are right!', 'same here', 'I agree 👍'];
+const CONTENT = [
+  'Mind adding dhui@nvidia.com too please thank you',
+  'Can access now, thanks!',
+  'yes',
+  'no',
+  'sure',
+  'okay see you at 3',
+  'Done: https://x.y/z',
+  'Thanks, the slides are uploaded',
+  '',
+  // Agreement that goes on to say something is content.
+  'you are right about desktop version. but then the hackathon requirement how',
+  'I see the problem: the port is closed',
+  'you know the venue?',
+];
 
 describe('courtesy-only messages are small talk', () => {
   it.each(SMALL)('%s', (body) => expect(isCourtesyOnly(body)).toBe(true));

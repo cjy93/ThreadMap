@@ -7,6 +7,25 @@ import { sql, type SQL } from 'drizzle-orm';
 
 /** Courtesy words and phrases (longest first); "yes", "no", "sure" are left out: they can answer. */
 export const COURTESY_PHRASES = [
+  // Bare agreement ("you know you are right", "same here"): the message agreed with carries the topic.
+  'you are so right',
+  'you are right',
+  'you re right',
+  'youre right',
+  'u are right',
+  'u r right',
+  'ur right',
+  'i think so',
+  'i agree',
+  'agreed',
+  'agree',
+  'same here',
+  'same',
+  'so true',
+  'exactly',
+  'indeed',
+  'i see',
+  'you know',
   'thank you very much',
   'thank you so much',
   'thanks so much',

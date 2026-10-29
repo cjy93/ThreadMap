@@ -92,6 +92,8 @@ export interface ContentMessage {
   content_revision: number;
   review: 'read' | 'missed';
   attachment_count: number;
+  /** The message's files, shown inline in the list. */
+  attachments?: { id: string; media_type: string; filename: string | null; availability: string; has_preview: boolean; description: string | null }[];
   topic_paths: PathItem[][];
 }
 

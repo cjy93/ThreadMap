@@ -491,7 +491,24 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, r
                     {it.edited ? <span className="pill">edited</span> : null}
                     {it.attachment_count ? <span className="pill">📎 {it.attachment_count}</span> : null}
                   </div>
-                  <div>{it.snippet ?? '(no text)'}</div>
+                  {it.snippet || !it.attachments?.length ? <div>{it.snippet ?? '(no text)'}</div> : null}
+                  {/* Photos, videos and voice clips right in the list; other files by name. */}
+                  {it.attachments?.map((a) =>
+                    ['image', 'sticker', 'video', 'audio'].includes(a.media_type) ? (
+                      <MediaView key={a.id} a={a} onFetch={fetchFile} />
+                    ) : (
+                      <div key={a.id} className="counts">
+                        📎{' '}
+                        {a.availability === 'cached' ? (
+                          <a href={`/api/attachments/${a.id}/content`} target="_blank" rel="noopener noreferrer">
+                            {a.filename ?? a.media_type}
+                          </a>
+                        ) : (
+                          (a.filename ?? a.media_type)
+                        )}
+                      </div>
+                    ),
+                  )}
                   <div className="path">{it.topic_paths.map(pathText).join(' | ')}</div>
                 </div>
                 {/* Mark read straight from the list, without opening the message. */}

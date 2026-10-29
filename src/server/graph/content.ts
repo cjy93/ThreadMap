@@ -108,12 +108,17 @@ export async function nodeContent(db: DbOrTx, scope: ContentScope, tree: Tree, g
       is_read: boolean;
       topic_ids: string[];
       attachment_count: number;
+      attachments: { id: string; media_type: string; filename: string | null; availability: string; has_preview: boolean; description: string | null }[];
     }>(sql`
       WITH mt AS (${matching}), mem AS (${membership})
       SELECT m.id, m.sender_label, m.direction, m.kind, m.body, m.sent_at, m.received_at, m.edited_at,
         m.content_revision, mt.is_read,
         ARRAY(SELECT p.topic_id::text FROM placements p WHERE p.message_id = m.id ORDER BY p.is_primary DESC, p.topic_id) AS topic_ids,
-        (SELECT count(*)::int FROM attachments a WHERE a.message_id = m.id) AS attachment_count
+        (SELECT count(*)::int FROM attachments a WHERE a.message_id = m.id) AS attachment_count,
+        -- Shown inline in the list (photos, videos, voice clips), so they need no extra click.
+        COALESCE((SELECT json_agg(json_build_object('id', a.id, 'media_type', a.media_type, 'filename', a.filename, 'availability', a.availability,
+            'has_preview', a.thumbnail IS NOT NULL, 'description', a.ai_description) ORDER BY a.ordinal)
+          FROM attachments a WHERE a.message_id = m.id), '[]'::json) AS attachments
       FROM messages m JOIN mt ON mt.id = m.id JOIN mem ON mem.message_id = m.id
       WHERE true ${keyset}
       ORDER BY m.sent_at DESC NULLS LAST, m.id DESC
@@ -129,6 +134,7 @@ export async function nodeContent(db: DbOrTx, scope: ContentScope, tree: Tree, g
       content_revision: r.content_revision,
       review: r.is_read ? 'read' : 'missed',
       attachment_count: r.attachment_count,
+      attachments: r.attachments,
       // Actual topic paths for every placement (deduplicated message, many paths).
       topic_paths: r.topic_ids.filter((t) => tree.nodes.has(t)).map((t) => pathOf(tree, t)),
       route: `/chats/${scope.messageChatId ?? scope.chatId}/messages/${r.id}`,

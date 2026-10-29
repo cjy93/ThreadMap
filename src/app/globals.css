@@ -281,8 +281,11 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .media-wrap .media.preview { filter: blur(1px); opacity: 0.85; }
 .media-wrap audio { width: 100%; max-width: 360px; }
 /* Ask: a chat-style search box and its reply. */
-.askbox { display: flex; gap: 6px; flex: 1; min-width: 260px; }
-.askbox input { flex: 1; min-width: 0; }
+/* Ask: the question box and its button as one pill, so Ask clearly belongs to the box. */
+.askbox { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 260px; padding: 3px 3px 3px 4px; border: 1px solid var(--border); border-radius: 999px; background: var(--panel-2); transition: border-color 150ms ease, box-shadow 150ms ease; }
+.askbox:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.askbox input[type='search'] { flex: 1; min-width: 0; border: none; background: transparent; outline: none; padding: 4px 10px; }
+.askbox button { flex: none; }
 .datebox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .datebox label { display: flex; align-items: center; gap: 4px; font-size: 13px; }
 /* Date slider (DateRange.tsx): two handles over the days this chat has messages, with a bar per
