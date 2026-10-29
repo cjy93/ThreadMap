@@ -548,3 +548,99 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .exact-badge { margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; color: var(--resources); border: 1px solid var(--resources); }
 .exact-badge.partial { color: var(--knowledge); border-color: var(--knowledge); }
 .ask-tier { margin: 10px 0 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-2); }
+
+/* ---------------------------------------------------------------------------
+ * Connect journey: the Connect page as numbered steps along a glowing line, each with a
+ * line-art drawing that draws itself in (ConnectJourney.tsx). Our own CSS and SVG.
+ * ------------------------------------------------------------------------- */
+.connect-page { max-width: 1040px; margin: 8px auto 40px; padding: 0 8px; }
+.connect-hero { text-align: center; max-width: 680px; margin: 18px auto 8px; }
+.connect-hero h2 { font-size: clamp(30px, 5vw, 46px); margin: 6px 0 10px; }
+.connect-hero .lede { font-size: 17px; color: var(--text-2); margin: 0 0 12px; }
+.jkicker { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.32em; font-size: 13px; color: var(--knowledge); }
+.leave-note { font-size: 13px; color: var(--muted); margin: 0 auto 8px; }
+.leave-note strong { color: var(--accent); }
+.fine-print { font-size: 13px; color: var(--muted); text-align: left; margin: 6px auto 0; max-width: 620px; }
+.fine-print summary { cursor: pointer; text-align: center; color: var(--text-2); list-style: none; }
+.fine-print summary::before { content: '▸ '; }
+.fine-print[open] summary::before { content: '▾ '; }
+
+.journey { list-style: none; margin: 26px 0 10px; padding: 0; position: relative; }
+/* The line: a soft glowing gradient that draws down the page. */
+.journey::before {
+  content: ''; position: absolute; left: 50%; top: 8px; bottom: 8px; width: 2px; transform: translateX(-50%) scaleY(0); transform-origin: top;
+  background: linear-gradient(var(--knowledge), color-mix(in srgb, var(--knowledge) 60%, var(--italic)) 55%, color-mix(in srgb, var(--knowledge) 10%, transparent));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--knowledge) 55%, transparent); border-radius: 2px; animation: jline 1.4s 0.15s ease-out forwards;
+}
+@keyframes jline { to { transform: translateX(-50%) scaleY(1); } }
+
+.jstep { display: grid; grid-template-columns: 1fr 72px 1fr; align-items: center; padding: 34px 0; position: relative; }
+.jstep .jtext { grid-row: 1; opacity: 0; transform: translateY(14px); transition: opacity 0.7s ease, transform 0.7s ease; }
+.jstep .jvisual { grid-row: 1; display: grid; place-items: center; opacity: 0; transition: opacity 0.9s 0.15s ease; }
+.jstep.in .jtext, .jstep.in .jvisual { opacity: 1; transform: none; }
+.jstep-left .jtext { grid-column: 1; text-align: right; }
+.jstep-left .jvisual { grid-column: 3; }
+.jstep-right .jtext { grid-column: 3; text-align: left; }
+.jstep-right .jvisual { grid-column: 1; }
+.jstep .jdot { grid-column: 2; grid-row: 1; justify-self: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border-strong); position: relative; z-index: 1; }
+.jstep-done .jdot { background: var(--knowledge); border-color: var(--knowledge); }
+.jstep-now .jdot { background: var(--text); border-color: var(--text); box-shadow: 0 0 0 6px color-mix(in srgb, var(--knowledge) 30%, transparent), 0 0 22px var(--knowledge); animation: jpulse 2.4s ease-in-out infinite; }
+@keyframes jpulse { 50% { box-shadow: 0 0 0 11px color-mix(in srgb, var(--knowledge) 12%, transparent), 0 0 30px var(--knowledge); } }
+.jstep-later .jtext { opacity: 0.55; }
+.jstep-later.in .jtext { opacity: 0.6; }
+.jstep h3 { font-size: clamp(24px, 3.2vw, 34px); margin: 6px 0 10px; }
+.jstep .jlede { font-size: 15px; color: var(--text-2); line-height: 1.6; }
+.jstep .jstatus { margin: 0 0 6px; }
+.jstep .jtech { font-size: 11px; opacity: 0.75; }
+.jstep-left .jactions, .jstep-left .phone-link { justify-content: flex-end; }
+.jactions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.jstep-left .jactions { justify-content: flex-end; }
+.jwide { grid-column: 1 / -1; grid-row: 2; margin-top: 22px; padding: 14px; border-radius: 16px; background: var(--panel); border: 1px solid var(--border); position: relative; z-index: 1; }
+.jwide table th, .jwide table td { padding: 6px 4px; border-bottom: 1px solid var(--border); }
+
+/* The live QR, framed like a screen with glowing corners; it stays black on white to scan. */
+.qr-frame { position: relative; padding: 14px; border-radius: 18px; background: color-mix(in srgb, var(--knowledge) 10%, var(--surface)); border: 1px solid var(--border-strong); box-shadow: 0 0 40px color-mix(in srgb, var(--knowledge) 35%, transparent); }
+.qr-frame img { display: block; width: 260px; height: 260px; border-radius: 8px; background: #fff; }
+.qr-frame::before, .qr-frame::after { content: ''; position: absolute; width: 26px; height: 26px; border: 2px solid var(--accent); }
+.qr-frame::before { top: -6px; left: -6px; border-right: none; border-bottom: none; border-radius: 10px 0 0 0; }
+.qr-frame::after { bottom: -6px; right: -6px; border-left: none; border-top: none; border-radius: 0 0 10px 0; }
+.qr-wait { width: 260px; height: 260px; display: grid; place-items: center; border: 1px dashed var(--border-strong); border-radius: 8px; }
+
+/* Line art that draws itself once its step is in view. */
+.jart { width: min(260px, 100%); height: auto; overflow: visible; }
+.jart * { fill: none; stroke: var(--knowledge); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; stroke-dashoffset: 1; }
+.jart .acc { stroke: var(--accent); }
+.jart .pink { stroke: var(--italic); }
+.jart .blue { stroke: var(--knowledge); }
+.jstep.in .jart * { animation: jdraw 1.1s ease forwards; }
+.jstep.in .jart .d2 { animation-delay: 0.35s; }
+.jstep.in .jart .d3 { animation-delay: 0.7s; }
+.jstep.in .jart .d4 { animation-delay: 1.05s; }
+@keyframes jdraw { to { stroke-dashoffset: 0; } }
+.jstep.in .jart .scan { animation: jdraw 0.6s 1.05s ease forwards, jscan 2.6s 1.7s ease-in-out infinite; }
+@keyframes jscan { 0%, 100% { transform: translateY(-18px); } 50% { transform: translateY(18px); } }
+.jstep.in .jart .node { animation: jdraw 1.1s 0.7s ease forwards, jfloat 4s 1.8s ease-in-out infinite; }
+@keyframes jfloat { 50% { transform: translateY(-3px); } }
+.jvisual .jart { animation: jbob 6s ease-in-out infinite; }
+@keyframes jbob { 50% { transform: translateY(-6px); } }
+
+.coverage { max-width: 720px; margin: 10px auto; }
+.coverage summary { cursor: pointer; color: var(--text-2); }
+.connect-foot { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 18px; }
+
+/* Phones: one column, the line on the left. */
+@media (max-width: 760px) {
+  .journey::before { left: 18px; }
+  .jstep { grid-template-columns: 36px 1fr; gap: 0 10px; padding: 22px 0; }
+  .jstep .jdot { grid-column: 1; grid-row: 1; align-self: start; margin-top: 6px; }
+  .jstep-left .jtext, .jstep-right .jtext { grid-column: 2; grid-row: 1; text-align: left; }
+  .jstep-left .jvisual, .jstep-right .jvisual { grid-column: 2; grid-row: 2; margin-top: 14px; }
+  .jstep-left .jactions { justify-content: flex-start; }
+  .jwide { grid-column: 1 / -1; grid-row: 3; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .journey::before { animation: none; transform: translateX(-50%) scaleY(1); }
+  .jstep .jtext, .jstep .jvisual { opacity: 1; transform: none; transition: none; }
+  .jart *, .jstep.in .jart * { animation: none !important; stroke-dashoffset: 0; }
+  .jvisual .jart, .jstep-now .jdot { animation: none; }
+}

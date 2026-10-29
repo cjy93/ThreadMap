@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar } from './Avatar';
+import { ChecklistArt, JourneyStep, MindMapArt, PhoneArt } from './ConnectJourney';
 import { api, leaveAndDeleteAccount } from './client';
 
 interface Status {
@@ -211,182 +212,223 @@ export function ConnectPanel({
   const shown = chats.filter((ch) => (kind === 'all' || ch.kind === kind) && matches(ch));
   const counts = { all: chats.length, group: chats.filter((ch) => ch.kind === 'group').length, direct: chats.filter((ch) => ch.kind === 'direct').length };
   const openedCount = chats.filter((ch) => ch.selected).length;
+  // Where the owner is: link the phone, then choose chats, then their maps grow.
+  const step = !linked ? 1 : openedCount ? 3 : 2;
+  const stateOf = (n: number) => (n < step ? 'done' : n === step ? 'now' : 'later') as 'done' | 'now' | 'later';
+  const qrVisual =
+    waitingForQr && !phoneMode ? (
+      <div className="qr-frame">
+        {qr ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={qr} alt="WhatsApp pairing QR code (owner only)" width={260} height={260} />
+        ) : (
+          <div className="qr-wait" role="status" aria-live="polite">
+            <span className="counts">Generating QR code…</span>
+          </div>
+        )}
+      </div>
+    ) : phoneMode && code ? (
+      <div className="pair-code" aria-label="Pairing code">
+        {code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code}
+      </div>
+    ) : (
+      <PhoneArt />
+    );
   return (
-    <div className="card" style={{ maxWidth: 720, margin: '16px auto' }}>
-      <h2 style={{ marginTop: 0 }}>Connect WhatsApp</h2>
-      <p className="counts">
-        ThreadMap runs a linked-device session in its cloud deployment (NVIDIA Brev). Chats you open are stored in the deployment&apos;s database and their text is sent to
-        Nebius Token Factory (NVIDIA Nemotron) for analysis. This uses Baileys, an unofficial WhatsApp Web library — an experimental integration that WhatsApp could restrict.
-        Messages of chats you have not opened are held only briefly in memory (≤32 MiB, ≤5 min), then discarded; only their name, type, last-message time and the small
-        profile photo of chats you scroll past are kept so this list can show them. ThreadMap never sends messages or read receipts.
-      </p>
-      <p className="counts">
-        <strong>Leaving deletes your data.</strong> If no ThreadMap page is open for 30 minutes, ThreadMap unlinks itself from your phone and deletes your chats, messages,
-        maps and photos, just like <em>Disconnect and delete my data</em>. Keep a ThreadMap tab open while you want it to keep capturing.
-      </p>
+    <div className="connect-page">
+      <header className="connect-hero">
+        <div className="jkicker">Link · choose · map</div>
+        <h2>Connect WhatsApp</h2>
+        <p className="lede">Scan once with your phone, open the chats you want, and NVIDIA Nemotron turns each one into a mind map.</p>
+        <p className="leave-note">
+          <strong>Leaving deletes your data.</strong> With no ThreadMap page open for 30 minutes, ThreadMap unlinks itself and deletes your chats, maps and photos. Keep a
+          tab open while you want it to keep capturing.
+        </p>
+        <details className="fine-print">
+          <summary>How ThreadMap handles your data</summary>
+          <p>
+            ThreadMap runs a linked-device session in its cloud deployment (NVIDIA Brev). Chats you open are stored in the deployment&apos;s database and their text is sent
+            to Nebius Token Factory (NVIDIA Nemotron) for analysis. This uses Baileys, an unofficial WhatsApp Web library — an experimental integration that WhatsApp could
+            restrict. Messages of chats you have not opened are held only briefly in memory (≤32 MiB, ≤5 min), then discarded; only their name, type, last-message time and
+            the small profile photo of chats you scroll past are kept so the list can show them. ThreadMap never sends messages or read receipts.
+          </p>
+          <p>
+            Leaving works like <em>Disconnect and delete my data</em>: the device is logged out of WhatsApp and every stored message, map and file is deleted.
+          </p>
+        </details>
+      </header>
 
-      <section>
-        <h3>1. Scan the QR code</h3>
-        <p>
-          <strong>Connection:</strong> <span className="pill">{c.state}</span> {c.detail ? <span className="counts">{c.detail}</span> : null}
-          <br />
-          <span className="counts">
+      <ol className="journey">
+        <JourneyStep n={1} kicker="Link" title={linked ? 'WhatsApp is linked' : 'Scan the QR code'} state={stateOf(1)} side="left" visual={qrVisual}>
+          <p className="jstatus">
+            <span className="pill">{c.state}</span> {c.detail ? <span className="counts">{c.detail}</span> : null}
+          </p>
+          {waitingForQr && !phoneMode ? (
+            <p className="jlede">
+              WhatsApp → Settings → Linked Devices → <strong>Link a device</strong>, then scan with WhatsApp&apos;s own scanner (not the camera app). The code refreshes by
+              itself.
+            </p>
+          ) : null}
+          {linked ? <p className="jlede">Your phone is linked. Choose chats below.</p> : null}
+          {!linked && st.pairing_allowed && CAN_PAIR.includes(state) && !requested ? (
+            <>
+              {chats.length ? (
+                <p className="counts" role="note">
+                  Scanning starts from scratch: the {chats.length} chats below, their messages and maps are deleted once the new scan succeeds.
+                </p>
+              ) : null}
+              <button className="primary" onClick={pair}>
+                Show QR code
+              </button>
+            </>
+          ) : null}
+          {!st.pairing_allowed && !linked ? <p className="counts">Pairing is disabled on this deployment (WHATSAPP_PAIRING_ENABLED=false).</p> : null}
+          {!linked && st.pairing_allowed ? (
+            <p>
+              <button className="linklike" onClick={() => setPhoneMode(!phoneMode)}>
+                {phoneMode ? 'Use a QR code instead' : "Can't scan? Link with phone number"}
+              </button>
+            </p>
+          ) : null}
+          {!linked && phoneMode ? (
+            <div className="phone-link">
+              <label>
+                WhatsApp number with country code
+                <input type="tel" inputMode="tel" placeholder="65 9123 4567" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </label>
+              <button className="primary" disabled={phone.replace(/\D/g, '').length < 8} onClick={() => void pairWithPhone()}>
+                Get code
+              </button>
+              {code ? (
+                <p className="counts">
+                  On your phone: WhatsApp → Settings → Linked Devices → Link a device → <strong>Link with phone number instead</strong>, then type the code shown here within
+                  about 2 minutes. If it expires, click Get code again for a new one.
+                </p>
+              ) : requested ? (
+                <p className="counts" role="status">
+                  Requesting a code from WhatsApp…
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="jactions">
+            {c.state === 'connected' || c.state === 'reconnecting' ? <button onClick={() => act('/api/whatsapp/pause', 'Pause')}>Pause sync</button> : null}
+            {c.state === 'paused' ? <button onClick={() => act('/api/whatsapp/resume', 'Resume')}>Resume sync</button> : null}
+            {linked || chats.length ? (
+              <button className="danger" onClick={() => void leaveAndDeleteAccount()}>
+                Disconnect &amp; delete my data
+              </button>
+            ) : c.state !== 'disconnected' || requested ? (
+              <button
+                className="danger"
+                onClick={() => {
+                  setRequested(false);
+                  void act('/api/whatsapp/disconnect', 'Disconnect');
+                }}
+              >
+                Cancel pairing
+              </button>
+            ) : null}
+          </div>
+          {c.remote_unlink_confirmed === false && !linked ? <p className="counts">Remote unlink not confirmed: remove “ThreadMap” in WhatsApp → Linked Devices.</p> : null}
+          {msg ? <p role="status">{msg}</p> : null}
+          <p className="counts jtech">
             Last event: {c.last_event_at ?? '—'} · companion heartbeat: {st.companion_heartbeat_at ?? '—'}
             {c.uncertain_intervals?.length ? ` · ${c.uncertain_intervals.length} possible gap(s) in coverage` : ''}
-          </span>
-        </p>
-        {linked ? <p role="status">WhatsApp is linked. Choose chats below.</p> : null}
-        {!linked && st.pairing_allowed && CAN_PAIR.includes(state) && !requested ? (
-          <>
-            {chats.length ? (
-              <p className="counts" role="note">
-                Scanning starts from scratch: the {chats.length} chats below, their messages and maps are deleted once the new scan succeeds.
-              </p>
-            ) : null}
-            <button className="primary" onClick={pair}>
-              Show QR code
-            </button>
-          </>
-        ) : null}
-        {!st.pairing_allowed && !linked ? <p className="counts">Pairing is disabled on this deployment (WHATSAPP_PAIRING_ENABLED=false).</p> : null}
-        {!linked && st.pairing_allowed ? (
-          <p>
-            <button className="linklike" onClick={() => setPhoneMode(!phoneMode)}>
-              {phoneMode ? 'Use a QR code instead' : "Can't scan? Link with phone number"}
-            </button>
           </p>
-        ) : null}
-        {!linked && phoneMode ? (
-          <div className="phone-link">
-            <label>
-              WhatsApp number with country code
-              <input type="tel" inputMode="tel" placeholder="65 9123 4567" value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </label>
-            <button className="primary" disabled={phone.replace(/\D/g, '').length < 8} onClick={() => void pairWithPhone()}>
-              Get code
-            </button>
-            {code ? (
+        </JourneyStep>
+
+        <JourneyStep
+          n={2}
+          kicker="Choose"
+          title="Choose your chats"
+          state={stateOf(2)}
+          side="right"
+          visual={<ChecklistArt />}
+          wide={
+            chats.length ? (
               <>
-                <div className="pair-code" aria-label="Pairing code">
-                  {code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code}
+                {/* Stays in view while scrolling a long chat list. */}
+                <div className="chat-toolbar">
+                  <div className="seg" role="group" aria-label="Chat type">
+                    {(['all', 'group', 'direct'] as const).map((k) => (
+                      <button key={k} aria-pressed={kind === k} onClick={() => setKind(k)}>
+                        {k === 'all' ? 'All' : k === 'group' ? 'Groups' : 'People'} ({counts[k]})
+                      </button>
+                    ))}
+                  </div>
+                  <input type="search" placeholder="Search by name or number" aria-label="Search chats" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: 1, minWidth: 180 }} />
                 </div>
-                <p className="counts">
-                  On your phone: WhatsApp → Settings → Linked Devices → Link a device → <strong>Link with phone number instead</strong>, then type this code
-                  within about 2 minutes. If it expires, click Get code again for a new one.
-                </p>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th align="left">Chat</th>
+                      <th align="left">Type</th>
+                      <th align="left">Last message</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {shown.map((ch) => {
+                      return (
+                        <tr key={ch.id} data-chat-id={ch.id} ref={ch.avatar_due ? watchAvatar : undefined}>
+                          <td>
+                            <div className="chat-name">
+                              <Avatar title={ch.title} url={ch.avatar_url} />
+                              <div>
+                                {ch.title} {ch.selected ? <span className="pill">Opened</span> : null}
+                                {/* The number helps tell people apart; never shown where WhatsApp masked it. */}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="counts">{ch.kind === 'group' ? 'Group' : 'Person'}</td>
+                          <td className="counts">{lastMessageLabel(ch.last_message_at)}</td>
+                          <td align="right">
+                            <button aria-label={`Open ${ch.title}`} disabled={opening !== null} onClick={() => void open(ch)}>
+                              {opening === ch.id ? 'Opening…' : 'Open'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {!shown.length ? (
+                      <tr>
+                        <td colSpan={4} className="counts">
+                          {q ? `No chats match “${search}”.` : 'No chats of this type yet.'}
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </>
-            ) : requested ? (
-              <p className="counts" role="status">Requesting a code from WhatsApp…</p>
-            ) : null}
-          </div>
-        ) : null}
-        {waitingForQr && !phoneMode ? (
-          <div>
-            <p>On your phone, open WhatsApp → Settings → Linked Devices → Link a device, and scan this code with WhatsApp&apos;s own scanner (not the camera app). It refreshes automatically.</p>
-            {qr ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={qr} alt="WhatsApp pairing QR code (owner only)" width={280} height={280} />
-            ) : (
-              <div role="status" aria-live="polite" style={{ width: 280, height: 280, display: 'grid', placeItems: 'center', border: '1px dashed var(--border-strong)', borderRadius: 12 }}>
-                <span className="counts">Generating QR code…</span>
-              </div>
-            )}
-          </div>
-        ) : null}
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-          {c.state === 'connected' || c.state === 'reconnecting' ? <button onClick={() => act('/api/whatsapp/pause', 'Pause')}>Pause sync</button> : null}
-          {c.state === 'paused' ? <button onClick={() => act('/api/whatsapp/resume', 'Resume')}>Resume sync</button> : null}
-          {linked || chats.length ? (
-            <button className="danger" onClick={() => void leaveAndDeleteAccount()}>
-              Disconnect &amp; delete my data
-            </button>
-          ) : c.state !== 'disconnected' || requested ? (
-            <button
-              className="danger"
-              onClick={() => {
-                setRequested(false);
-                void act('/api/whatsapp/disconnect', 'Disconnect');
-              }}
-            >
-              Cancel pairing
+            ) : null
+          }
+        >
+          <p className="jlede">
+            {!chats.length
+              ? linked
+                ? 'Waiting for WhatsApp to send your chat list… this can take a minute after linking.'
+                : 'Your WhatsApp chats appear here after you scan the code.'
+              : `Open the chats you want mapped: ${openedCount} of ${chats.length} opened. Chats you never open are not stored or analysed.`}
+          </p>
+        </JourneyStep>
+
+        <JourneyStep n={3} kicker="Map" title="Watch the map grow" state={stateOf(3)} side="left" visual={<MindMapArt />}>
+          <p className="jlede">
+            Opening a chat stores its messages, asks your phone for its recent history and lets NVIDIA Nemotron map it. The first build is the slowest; after that, Refresh only
+            reads new messages.
+          </p>
+          {openedCount ? (
+            <button className="primary" onClick={onClose}>
+              Go to my maps
             </button>
           ) : null}
-        </div>
-        {c.remote_unlink_confirmed === false && !linked ? <p className="counts">Remote unlink not confirmed: remove “ThreadMap” in WhatsApp → Linked Devices.</p> : null}
-        {msg ? <p role="status">{msg}</p> : null}
-      </section>
-
-      <section>
-        <h3>2. Choose chats</h3>
-        {!chats.length ? (
-          <p className="counts">
-            {linked ? 'Waiting for WhatsApp to send your chat list… this can take a minute after linking.' : 'Your WhatsApp chats appear here after you scan the code.'}
-          </p>
-        ) : (
-          <>
-            <p className="counts">
-              Click Open on a chat to see its map. The first time you open a chat, ThreadMap starts storing its messages, fetches its recent history from your phone and
-              analyses it with NVIDIA Nemotron; chats you never open are not stored or analysed. {openedCount} of {chats.length} opened.
-            </p>
-            {/* Stays in view while scrolling a long chat list. */}
-            <div className="chat-toolbar">
-              <div className="seg" role="group" aria-label="Chat type">
-                {(['all', 'group', 'direct'] as const).map((k) => (
-                  <button key={k} aria-pressed={kind === k} onClick={() => setKind(k)}>
-                    {k === 'all' ? 'All' : k === 'group' ? 'Groups' : 'People'} ({counts[k]})
-                  </button>
-                ))}
-              </div>
-              <input type="search" placeholder="Search by name or number" aria-label="Search chats" value={search} onChange={(e) => setSearch(e.target.value)} style={{ flex: 1, minWidth: 180 }} />
-            </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  <th align="left">Chat</th>
-                  <th align="left">Type</th>
-                  <th align="left">Last message</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((ch) => {
-                  return (
-                    <tr key={ch.id} data-chat-id={ch.id} ref={ch.avatar_due ? watchAvatar : undefined}>
-                      <td>
-                        <div className="chat-name">
-                          <Avatar title={ch.title} url={ch.avatar_url} />
-                          <div>
-                            {ch.title} {ch.selected ? <span className="pill">Opened</span> : null}
-                            {/* The number helps tell people apart; never shown where WhatsApp masked it. */}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="counts">{ch.kind === 'group' ? 'Group' : 'Person'}</td>
-                      <td className="counts">{lastMessageLabel(ch.last_message_at)}</td>
-                      <td align="right">
-                        <button aria-label={`Open ${ch.title}`} disabled={opening !== null} onClick={() => void open(ch)}>
-                          {opening === ch.id ? 'Opening…' : 'Open'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!shown.length ? (
-                  <tr>
-                    <td colSpan={4} className="counts">
-                      {q ? `No chats match “${search}”.` : 'No chats of this type yet.'}
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </>
-        )}
-      </section>
+        </JourneyStep>
+      </ol>
 
       {st.history?.length ? (
-        <section>
-          <h3>Coverage (observed, not a completeness guarantee)</h3>
+        <details className="card coverage">
+          <summary>Coverage (observed, not a completeness guarantee)</summary>
           {st.history.map((h) => (
             <div key={h.chat_id} className="counts" style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
               <span>
@@ -398,9 +440,9 @@ export function ConnectPanel({
             Analysis backlog: {st.analysis?.pending ?? 0} jobs, {st.analysis?.undispatched ?? 0} messages queued{st.analysis?.budget_paused ? ` · ${st.analysis.budget_paused} paused by budget` : ''}
             {st.analysis?.failed ? ` · ${st.analysis.failed} failed` : ''}
           </div>
-        </section>
+        </details>
       ) : null}
-      <p style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <p className="connect-foot">
         <button onClick={onClose}>Back to maps</button>
         {/* Home without signing out: signing out deletes this account's data. */}
         <a href="/?home=1">
