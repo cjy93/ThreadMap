@@ -92,7 +92,7 @@ export function BuildProgress({ chatKey, total, pending, jobs, unread, failed, b
           <span style={{ width: `${reading ? pct : 100}%` }} className={reading ? undefined : 'busy'} />
         </div>
         <div className="bp-sub">
-          The first build is the slowest: Nemotron reads every message in batches, then lays out the topics, and the messages appear on the map once that is done. After that, Refresh only reads new messages, and Rebuild map reuses what was already read.
+          The first build is the slowest: Nemotron reads every message in batches, then lays out the topics, and the messages appear on the map once that is done. After that, Refresh only reads new messages, and Re-read chat reads every message again.
         </div>
       </div>
     );

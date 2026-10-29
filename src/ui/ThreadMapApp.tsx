@@ -656,27 +656,6 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
         {mode === 'private' && chat?.source === 'whatsapp' ? (
           <button
             disabled={refreshing || chat.analysis.pending_jobs > 0}
-            title="Throw away this map and let NVIDIA Nemotron build it again from the discussions already read. Messages and Read/Missed stay."
-            onClick={async () => {
-              if (!window.confirm(`Rebuild the map for ${chat.title} from scratch? The current topics, including any you renamed or moved, are replaced. Messages and Read/Missed are kept.`)) return;
-              setRefreshing(true);
-              try {
-                await api(`/api/chats/${chat.id}/rebuild?fresh=1`, {
-                  method: 'POST',
-                });
-                await loadChats();
-                void loadMap();
-              } finally {
-                setRefreshing(false);
-              }
-            }}
-          >
-            Rebuild map
-          </button>
-        ) : null}
-        {mode === 'private' && chat?.source === 'whatsapp' ? (
-          <button
-            disabled={refreshing || chat.analysis.pending_jobs > 0}
             title="Let NVIDIA Nemotron read every message of this chat again under the current rules (e.g. one subject per discussion), then build the map fresh. Messages and Read/Missed stay."
             onClick={async () => {
               if (
