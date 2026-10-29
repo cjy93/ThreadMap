@@ -27,6 +27,21 @@ interface AskAnswer {
   read: { messages: number; discussions: number } | null;
   points: { text: string; sources: { message_id: string; chat_id: string; sender: string; snippet: string }[] }[];
 }
+/** A small-talk message left off the map, as listed in the Small talk panel. */
+interface SmallTalkMessage {
+  message_id: string;
+  chat_id: string;
+  sender: string;
+  snippet: string;
+  sent_at: string | null;
+  review: 'read' | 'missed';
+}
+interface SmallTalkState {
+  chatId: string;
+  items: SmallTalkMessage[] | null;
+  total: number;
+  next: number | null;
+}
 /** A message starred in WhatsApp, as listed in the Starred panel. */
 interface StarredMessage {
   message_id: string;
@@ -66,6 +81,8 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
   const [searchRes, setSearchRes] = useState<SearchResult | null>(null);
   const [answer, setAnswer] = useState<AnswerState | null>(null);
   const [starred, setStarred] = useState<StarredState | null>(null);
+  // Small talk left off the map, listed on request so the owner can check nothing important went.
+  const [smallTalk, setSmallTalk] = useState<SmallTalkState | null>(null);
   const askGen = useRef(0);
   // The current search's parameters, to fetch further pages of its matches as the list scrolls.
   const askParamsRef = useRef<Record<string, string | undefined> | null>(null);
@@ -275,6 +292,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
       setSelectedNode(id);
       setMessageId(null);
       setStarred(null);
+      setSmallTalk(null);
       setHeadFolded(true);
     },
     [clearAsk],
@@ -317,6 +335,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
     }
     const my = ++askGen.current;
     setStarred(null);
+    setSmallTalk(null);
     setAsking(true);
     setAnswer(null);
     let res: SearchResult;
@@ -406,7 +425,23 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
   // The shown map's analysis: the chat's own, or the one-sided map's.
   const analysis = map?.analysis ?? chat?.analysis;
   // Starred: messages starred in WhatsApp, for this chat or every opened chat.
+  const openSmallTalk = async (cid: string, offset = 0) => {
+    if (!offset) {
+      setSelectedNode(null);
+      setMessageId(null);
+      setSearchRes(null);
+      setStarred(null);
+      setSmallTalk({ chatId: cid, items: null, total: 0, next: null });
+    }
+    try {
+      const r = await api<{ messages: SmallTalkMessage[]; total: number; next_offset: number | null }>(`/api/chats/${cid}/small-talk?${qs({ offset: offset ? String(offset) : undefined })}`);
+      setSmallTalk((cur) => (cur?.chatId === cid ? { chatId: cid, items: [...(offset ? (cur.items ?? []) : []), ...r.messages], total: r.total, next: r.next_offset } : cur));
+    } catch {
+      setSmallTalk((cur) => (cur?.chatId === cid ? { ...cur, items: cur.items ?? [] } : cur));
+    }
+  };
   const openStarred = async (scope: 'chat' | 'all') => {
+    setSmallTalk(null);
     setSelectedNode(null);
     setMessageId(null);
     setSearchRes(null);
@@ -482,6 +517,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                 setConceptMap(false);
                 setStudyFor(null);
                 setStarred(null);
+                setSmallTalk(null);
                 setMsgTrail([]);
                 setHeadFolded(false);
               }}
@@ -669,9 +705,14 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
               Chat: {map.chat_totals.message_count} messages · {map.chat_totals.missed_count} missed · {map.chat_totals.message_count - map.chat_totals.missed_count} read
             </span>
             {map.chat_totals.filler_count ? (
-              <span title="Messages that add nothing on their own (“ok”, “lol”, throwaway quips) are not counted or listed on the map, so its counts add up to less than the chat's. They still show, dimmed, when you open a message in their discussion.">
-                {map.chat_totals.filler_count} small-talk messages left off the map ⓘ
-              </span>
+              <button
+                className="status-link"
+                aria-pressed={smallTalk !== null}
+                title="Messages that add nothing on their own (“ok”, “lol”, throwaway quips) are not counted or listed on the map, so its counts add up to less than the chat's. Click to list them and check nothing important was left out."
+                onClick={() => (smallTalk ? setSmallTalk(null) : chatId ? void openSmallTalk(chatId) : undefined)}
+              >
+                {map.chat_totals.filler_count} small-talk messages left off the map · {smallTalk ? 'hide' : 'show them'}
+              </button>
             ) : null}
             {map.chat_totals.pending_analysis_count ? (
               (() => {
@@ -801,11 +842,11 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
         ) : null}
       </main>
 
-      {(searchRes || selectedNode || messageId || starred) && !(studyFor && sourceHidden) ? (
+      {(searchRes || selectedNode || messageId || starred || smallTalk) && !(studyFor && sourceHidden) ? (
         <aside className="drawer" aria-label="Details">
           {/* Stays at the top while the details below scroll. */}
           <div className="drawer-bar">
-            <span className="counts">{messageId ? 'Source' : starred ? 'Starred' : searchRes ? 'Ask results' : 'Content'}</span>
+            <span className="counts">{messageId ? 'Source' : smallTalk ? 'Small talk' : starred ? 'Starred' : searchRes ? 'Ask results' : 'Content'}</span>
             <span>
               {/* Focus toggles: narrow the map to this bubble's branch, or go back to the whole map to pick another. */}
               {selectedNode && selectedNode !== focus && map?.nodes.find((n) => n.id === selectedNode && n.kind === 'TOPIC') ? (
@@ -818,7 +859,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                   Full map
                 </button>
               ) : null}{' '}
-              {messageId && (msgTrail.length || selectedNode || starred || searchRes) ? (
+              {messageId && (msgTrail.length || selectedNode || starred || smallTalk || searchRes) ? (
                 <button title={msgTrail.length ? 'Back to the message you came from' : 'Back to the list'} onClick={goBack}>
                   ← Back
                 </button>
@@ -836,6 +877,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                   setSelectedNode(null);
                   setSearchRes(null);
                   setStarred(null);
+                  setSmallTalk(null);
                   setHeadFolded(false);
                 }}
               >
@@ -859,6 +901,32 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                 onOpenMessage={onOpenMessage}
                 onConceptMap={openStudy}
               />
+            </div>
+          ) : smallTalk ? (
+            <div className="dbody">
+              {smallTalk.items === null ? (
+                <p className="counts">Loading…</p>
+              ) : smallTalk.items.length ? (
+                <>
+                  <p className="counts">
+                    {smallTalk.total.toLocaleString('en-US')} small-talk message{smallTalk.total === 1 ? '' : 's'} left off this chat’s map, newest first. Double-click one to open it in its discussion and check nothing important was screened out.
+                  </p>
+                  {smallTalk.items.map((m) => (
+                    <div key={m.message_id} className="msg small-talk" {...openOnDoubleClick(() => onOpenMessage(m.chat_id, m.message_id))}>
+                      <strong>{m.sender}</strong> <span className={m.review === 'missed' ? 'missed' : 'readbadge'}>{m.review}</span>{' '}
+                      <span className="counts">{m.sent_at ? new Date(m.sent_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''}</span>
+                      <div>{m.snippet}</div>
+                    </div>
+                  ))}
+                  {smallTalk.next !== null ? (
+                    <div className="ask-more">
+                      <button onClick={() => void openSmallTalk(smallTalk.chatId, smallTalk.next!)}>Load more ({(smallTalk.total - smallTalk.items.length).toLocaleString('en-US')} left)</button>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <p className="counts">No small talk was left off this chat’s map.</p>
+              )}
             </div>
           ) : starred ? (
             <div className="dbody">

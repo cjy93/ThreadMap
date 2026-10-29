@@ -737,3 +737,34 @@ export async function listStarred(db: Db, ctx: AuthCtx, params: URLSearchParams)
     }),
   };
 }
+
+/**
+ * The small talk left off a chat's map ("ok", "lol", throwaway quips), newest first, a page at
+ * a time, so the owner can check that nothing important was screened out.
+ */
+export async function listSmallTalk(db: Db, ctx: AuthCtx, chatId: string, params: URLSearchParams) {
+  const chat = await requireChat(db, ctx, chatId);
+  const PAGE = 200;
+  const offset = Math.max(0, Math.min(1_000_000, Number(params.get('offset')) || 0));
+  const rows = await db.execute<{ id: string; sender_label: string; body: string | null; kind: string; sent_at: Date | null; read: boolean; total: number }>(sql`
+    SELECT m.id, m.sender_label, m.body, m.kind, m.sent_at,
+      EXISTS (SELECT 1 FROM review_state r WHERE r.user_id = ${ctx.userId} AND r.message_id = m.id AND r.status = 'read' AND r.reviewed_revision = m.content_revision) AS read,
+      count(*) OVER ()::int AS total
+    FROM messages m
+    WHERE m.chat_id = ${chat.id}::uuid AND m.filler AND m.state = 'active'
+    ORDER BY m.sent_at DESC NULLS LAST, m.id DESC
+    LIMIT ${PAGE} OFFSET ${offset}`);
+  const total = rows.rows[0]?.total ?? 0;
+  return {
+    total,
+    next_offset: offset + rows.rows.length < total ? offset + rows.rows.length : null,
+    messages: rows.rows.map((r) => ({
+      message_id: r.id,
+      chat_id: chat.id,
+      sender: r.sender_label,
+      snippet: (r.body ?? (r.kind === 'media' ? '[media]' : '')).slice(0, 280),
+      sent_at: r.sent_at ? new Date(r.sent_at).toISOString() : null,
+      review: r.read ? ('read' as const) : ('missed' as const),
+    })),
+  };
+}
