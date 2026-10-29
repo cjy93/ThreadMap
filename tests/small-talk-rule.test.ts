@@ -44,4 +44,16 @@ describe('the same rule in the database', () => {
     expect(filler.get(rows[0].id)).toBe(true);
     expect(filler.get(rows[1].id)).toBe(false);
   });
+
+  it('migration 0018 clears what the old rule flagged for a re-check, but keeps courtesy-only small talk', async () => {
+    const rows = (await t.db.execute<{ id: string }>(sql`SELECT id FROM messages WHERE chat_id = ${chatId}::uuid AND kind = 'text' ORDER BY sent_at, id LIMIT 2`)).rows;
+    await t.db.update(s.messages).set({ body: 'Done', filler: true }).where(eq(s.messages.id, rows[0].id));
+    await t.db.update(s.messages).set({ body: 'ya he uses claude', filler: true }).where(eq(s.messages.id, rows[1].id));
+    await t.db.execute(sql.raw(readFileSync('src/db/migrations/0018_rescreen_small_talk.sql', 'utf8')));
+    const after = await t.db.select({ id: s.messages.id, filler: s.messages.filler }).from(s.messages).where(sql`${s.messages.id} IN (${rows[0].id}::uuid, ${rows[1].id}::uuid)`);
+    const filler = new Map(after.map((m) => [m.id, m.filler]));
+    expect(filler.get(rows[0].id)).toBe(true);
+    // Screened again by the next build, under the new rule.
+    expect(filler.get(rows[1].id)).toBeNull();
+  });
 });

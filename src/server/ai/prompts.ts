@@ -236,7 +236,7 @@ ${ANSWER_RULES}
   };
 }
 
-const FILLER_RULE = `Filler is a message that adds nothing a reader of the topic needs: acknowledgements and thanks ("ok", "noted", "done", "thanks", "thank you"), also when they reply to a request (the request carries the topic), laughter and reactions ("lol", "haha", emoji only), throwaway quips or banter with no information ("is fake comment", "must be a god"), and greetings. A short message that answers, decides, asks something real, or carries a fact, link, file, time or place is not filler.`;
+const FILLER_RULE = `Filler (small talk) is social chatter a reader of the topic does not need: acknowledgements and thanks ("ok", "noted", "done", "thank you"), also when they reply to a request (the request carries the topic); bare agreement ("I think so", "same"); laughter and reactions ("lol", "haha", emoji only); greetings; and quick social or meet-up chatter ("Who is going?", "Where shall we meet?", "My boss had a rough day"). A message that answers a question, or shares information, an observation or an opinion with its reasons, is NOT filler, however short or casual (e.g. "ya he uses claude" answering whether he uses AI; "no because unrealistic. His picture so messy, no multi angle"). Nor is one that decides something or carries a fact, link or file. When unsure, it is not filler.`;
 
 /** Mark the messages that add nothing on their own; they are left off the map but kept in their thread. */
 export function fillerPrompt(chatTitle: string, messages: { ref: string; discussion: string; text: string }[]) {
