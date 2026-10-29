@@ -56,6 +56,7 @@ const PLANETS: Planet[] = [
       'At linking, WhatsApp sends recent history for every chat, once. For unopened chats ThreadMap holds it in memory for 5 minutes, then drops it, never saved.',
       'Tip: open the chats you care about within 5 minutes of linking to keep that history.',
       'Opening a chat later works too: new messages are saved from then on, and ThreadMap asks your phone for older ones. For more, keep WhatsApp open on your phone and click Load older messages (50 at a time; WhatsApp may send fewer).',
+      'Missed the window? Click Disconnect & delete my data, then scan the QR code again: WhatsApp sends the history once more, so open the chats you want within 5 minutes. This first deletes your current chats and maps.',
     ],
   },
   { key: 'readonly', group: 'guard', deg: 326, label: 'READ-ONLY', kind: 'pink', r: 12, text: 'ThreadMap never sends messages or read receipts.' },
