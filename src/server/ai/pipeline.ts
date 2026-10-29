@@ -602,6 +602,41 @@ export async function rebuildMapFromScratch(db: Db, chatId: string): Promise<str
   return requestRebuild(db, chatId);
 }
 
+/**
+ * Re-read a chat from scratch: like rebuildMapFromScratch, but the discussions are
+ * read again too, under the current reading rules (e.g. one subject per discussion).
+ * Every topic and every discussion goes; every message is queued again as if the chat
+ * had just been opened, and the first build runs when the reading is done. Messages,
+ * Read/Missed and stars are untouched. Returns false while analysis is running.
+ */
+export async function rereadChatFromScratch(db: Db, chatId: string): Promise<boolean> {
+  const running = await db.execute(sql`SELECT 1 FROM analysis_jobs WHERE chat_id = ${chatId}::uuid AND status = 'running' LIMIT 1`);
+  if (running.rows.length) return false;
+  await db.transaction(async (tx) => {
+    const chat = await lockChat(tx, chatId);
+    await tx.execute(sql`UPDATE analysis_jobs SET status = 'cancelled' WHERE chat_id = ${chatId}::uuid AND status IN ('pending', 'budget_paused')`);
+    await tx.execute(sql`UPDATE user_chat_view_preferences SET focus_node_id = NULL WHERE chat_id = ${chatId}::uuid`);
+    await tx.delete(s.topicMergeMap).where(eq(s.topicMergeMap.chatId, chatId));
+    // Category roots stay; everything beneath them goes (placements, discussions, links and frontiers cascade).
+    await tx.delete(s.topics).where(and(eq(s.topics.chatId, chatId), eq(s.topics.kind, 'TOPIC')));
+    await tx.delete(s.analysisUnits).where(eq(s.analysisUnits.chatId, chatId));
+    // Every message waits to be read again (the outbox is unique per message revision).
+    await tx.delete(s.analysisOutbox).where(eq(s.analysisOutbox.chatId, chatId));
+    await tx.execute(sql`
+      INSERT INTO analysis_outbox (workspace_id, chat_id, message_id, revision, deletion_generation, selection_epoch)
+      SELECT m.workspace_id, m.chat_id, m.id, m.content_revision, ${chat.deletionGeneration}, ${chat.selectionEpoch}
+      FROM messages m WHERE m.chat_id = ${chatId}::uuid AND m.state = 'active' AND m.kind IN ('text', 'media')`);
+    // Never mapped: the first build runs once the reading is done; the window lets the reading start now.
+    const [g] = await tx
+      .update(s.chats)
+      .set({ taxonomyVersion: 0, graphVersion: sql`${s.chats.graphVersion} + 1`, autoAnalyzeUntil: new Date(Date.now() + 2 * 60_000) })
+      .where(eq(s.chats.id, chatId))
+      .returning({ v: s.chats.graphVersion, ws: s.chats.workspaceId });
+    await notifyChange(tx, { ws: g.ws, kind: 'graph', chatId, version: g.v });
+  });
+  return true;
+}
+
 /** Failed map builds retried automatically before the chat waits for Refresh. */
 const MAX_AUTO_RESUMES = 3;
 

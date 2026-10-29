@@ -4,7 +4,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import * as s from '../../db/schema';
 import { loadAppConfig } from '../../lib/config';
-import { analyseSide, mapNeedsTidy, rebuildMapFromScratch, requestRebuild, resumePausedFrontiers, type MapSide } from '../ai/pipeline';
+import { analyseSide, mapNeedsTidy, rebuildMapFromScratch, requestRebuild, rereadChatFromScratch, resumePausedFrontiers, type MapSide } from '../ai/pipeline';
 import type { Db } from '../db';
 import { notifyChange } from '../notify';
 import { getStorage } from '../storage';
@@ -407,6 +407,16 @@ export async function rebuildChatFromScratch(db: Db, ctx: AuthCtx, chatId: strin
   if (!id) throw new SafeError('Analysis is running for this chat; rebuild the map once it finishes.', 409, 'busy');
   await notifyChange(db, { ws: ctx.workspaceId, kind: 'analysis', chatId: chat.id });
   return { job_id: id, note: 'Rebuilding the map from scratch with NVIDIA Nemotron…' };
+}
+
+/** "Re-read chat": NVIDIA Nemotron reads every message again under the current rules, then maps it fresh. */
+export async function rereadChat(db: Db, ctx: AuthCtx, chatId: string) {
+  ownerOnly(ctx);
+  const chat = await requireChat(db, ctx, chatId);
+  if (!chat.selected) throw new SafeError('open this chat first', 409, 'not_opened');
+  if (!(await rereadChatFromScratch(db, chat.id))) throw new SafeError('Analysis is running for this chat; re-read it once it finishes.', 409, 'busy');
+  await notifyChange(db, { ws: ctx.workspaceId, kind: 'analysis', chatId: chat.id });
+  return { ok: true, note: 'NVIDIA Nemotron is reading the whole chat again…' };
 }
 
 export async function retryJob(db: Db, ctx: AuthCtx, jobId: string) {

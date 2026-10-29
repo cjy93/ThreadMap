@@ -655,6 +655,30 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
         ) : null}
         {mode === 'private' && chat?.source === 'whatsapp' ? (
           <button
+            disabled={refreshing || chat.analysis.pending_jobs > 0}
+            title="Let NVIDIA Nemotron read every message of this chat again under the current rules (e.g. one subject per discussion), then build the map fresh. Messages and Read/Missed stay."
+            onClick={async () => {
+              if (
+                !window.confirm(
+                  `Re-read ${chat.title} from scratch? NVIDIA Nemotron reads all ${chat.message_count.toLocaleString('en-US')} messages again and builds a new map: several minutes for a long chat, and it uses Nemotron calls again. The current topics, including any you renamed or moved, are replaced. Messages and Read/Missed are kept.`,
+                )
+              )
+                return;
+              setRefreshing(true);
+              try {
+                await api(`/api/chats/${chat.id}/rebuild?reread=1`, { method: 'POST' });
+                await loadChats();
+                void loadMap();
+              } finally {
+                setRefreshing(false);
+              }
+            }}
+          >
+            Re-read chat
+          </button>
+        ) : null}
+        {mode === 'private' && chat?.source === 'whatsapp' ? (
+          <button
             disabled={olderNote !== null}
             title="Ask WhatsApp (via your phone) for the older messages it still has, 50 at a time, up to the per-chat limit. They join the Refresh count."
             onClick={async () => {
