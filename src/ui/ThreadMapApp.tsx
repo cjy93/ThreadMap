@@ -1045,18 +1045,22 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                   {searchRes.total && searchRes.total > searchRes.results.length
                     ? `${searchRes.results.length} of ${searchRes.total.toLocaleString('en-US')} messages`
                     : `${searchRes.results.length} message${searchRes.results.length === 1 ? '' : 's'}`}{' '}
-                  · rarest words first · double-click to open
+                  · exact, then partial, then by meaning · double-click to open
                 </div>
               ) : null}
-              {searchRes.results.map((r) => (
-                <div key={r.message_id} className="msg ask-hit" {...openOnDoubleClick(() => onOpenMessage(r.chat_id, r.message_id))}>
+              {searchRes.results.map((r, i) => (
+                <div key={r.message_id}>
+                {r.match && r.match !== searchRes.results[i - 1]?.match ? (
+                  <div className="ask-tier">{{ exact: 'Exact match', partial: `Contains “${searchRes.query.trim()}” inside a word`, meaning: 'Related by meaning' }[r.match]}</div>
+                ) : null}
+                <div className="msg ask-hit" {...openOnDoubleClick(() => onOpenMessage(r.chat_id, r.message_id))}>
                   {r.context?.before ? (
                     <div className="ask-ctx">
                       ↑ {r.context.before.rel} · <strong>{r.context.before.sender}</strong>: {r.context.before.text}
                     </div>
                   ) : null}
                   <strong>{r.sender}</strong> <span className={r.review === 'missed' ? 'missed' : 'readbadge'}>{r.review}</span>
-                  {r.exact ? <span className="exact-badge">exact match</span> : null}
+                  {r.match === 'exact' || (!r.match && r.exact) ? <span className="exact-badge">exact match</span> : r.match === 'partial' ? <span className="exact-badge partial">partial match</span> : null}
                   <div>{r.snippet}</div>
                   {r.context?.after ? (
                     <div className="ask-ctx">
@@ -1064,6 +1068,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                     </div>
                   ) : null}
                   <div className="path">{r.topic_paths.map((p) => p.map((x) => x.title).join(' › ')).join(' | ')}</div>
+                </div>
                 </div>
               ))}
               {nextOffset !== null ? (

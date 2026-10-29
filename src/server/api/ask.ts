@@ -99,6 +99,14 @@ const TYPED_TERM_WEIGHT = 5;
 // Results per page; the page asks for the next one (same terms, no new model call) as you scroll.
 export const ASK_PAGE_SIZE = 100;
 
+/** Escapes text for a regular expression (JavaScript and PostgreSQL alike). */
+const reEscape = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Whether normalized text contains the asked words as whole words ("clip" in "the clip", not in "liceclip"). */
+export function hasExactWords(normalized: string, asked: string): boolean {
+  return asked.length > 1 && new RegExp(`(?<![\\p{L}\\p{N}])${reEscape(asked)}(?![\\p{L}\\p{N}])`, 'u').test(normalized);
+}
+
 /** The pieces of the question searched inside words ("clip" in "LiceClip"): typed words of 3+ letters. */
 export const fragmentsOf = (question: string) => {
   const words = normalizeSearch(question).split(/\s+/).filter(Boolean);
@@ -324,15 +332,18 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   // Typed weight for a typed word and for any term containing one ("liceclip" for "clip").
   const typed = new Set(normalizeSearch(question).split(/\s+/));
   const isTyped = (t: string) => typed.has(t) || fragments.some((f) => t.includes(f));
-  // A message containing exactly what was asked comes first, whatever else matches more terms.
+  // Three tiers, each ranked by score within: 0 = the asked words as whole words ("the clip"),
+  // 1 = a typed word inside a longer word ("LiceClip"), 2 = by meaning (Nemotron's terms, topics).
   const asked = normalizeSearch(question).trim();
-  const exactSql = asked.length > 1 ? sql`(m.search_text LIKE ${likePattern(asked)})` : sql`false`;
+  const exactSql = asked.length > 1 ? sql`(m.search_text ~ ${`\\m${reEscape(asked)}\\M`})` : sql`false`;
+  const partialSql = fragments.length ? sql`(${sql.join(fragments.map((f) => sql`m.search_text LIKE ${likePattern(f)}`), sql` OR `)})` : sql`false`;
+  const tierSql = sql`(CASE WHEN ${exactSql} THEN 0 WHEN ${partialSql} THEN 1 ELSE 2 END)`;
   const termValues = terms.length ? sql.join(terms.map((t) => sql`(${t}, ${likePattern(t)}, ${isTyped(t) ? TYPED_TERM_WEIGHT : 1}::int)`), sql`, `) : sql`(NULL::text, NULL::text, 0)`;
   const topicArray = topicIds.length ? sql`ARRAY[${sql.join(topicIds.map((id) => sql`${id}::uuid`), sql`, `)}]` : sql`ARRAY[]::uuid[]`;
   // Rare terms count more: someone searching usually wants a name or a term, not a common word.
   // A term's weight is scaled from 1x (in every message searched) up to 2x (in just one), by how
   // many of the searched messages it matches; a typed word still outweighs Nemotron's additions.
-  const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; sent_at: Date | null; is_read: boolean; content_revision: number; score: number; exact: boolean; total: number }>(sql`
+  const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; sent_at: Date | null; is_read: boolean; content_revision: number; score: number; tier: number; total: number }>(sql`
     WITH mt AS (${matching}), terms(t, p, w) AS (VALUES ${termValues}),
     n AS (SELECT greatest(count(*), 2)::float AS n FROM mt),
     ts AS (
@@ -344,10 +355,10 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
         (SELECT coalesce(sum(ts.w * (1 + ln(n.n / least(ts.df, n.n)) / ln(n.n))), 0) FROM ts, n WHERE ${termMatchSql(sql`ts.t`, sql`ts.p`)})
         + CASE WHEN EXISTS (SELECT 1 FROM placements pl WHERE pl.message_id = m.id AND pl.topic_id = ANY(${topicArray})) THEN 2 ELSE 0 END AS score
       FROM messages m JOIN mt ON mt.id = m.id)
-    SELECT m.id, m.chat_id, m.sender_label, m.body, m.sent_at, mt.is_read, m.content_revision, scored.score::float AS score, ${exactSql} AS exact, count(*) OVER ()::int AS total
+    SELECT m.id, m.chat_id, m.sender_label, m.body, m.sent_at, mt.is_read, m.content_revision, scored.score::float AS score, ${tierSql} AS tier, count(*) OVER ()::int AS total
     FROM scored JOIN messages m ON m.id = scored.id JOIN mt ON mt.id = m.id
     WHERE scored.score > 0
-    ORDER BY ${exactSql} DESC, scored.score DESC, m.sent_at DESC NULLS LAST, m.id DESC LIMIT ${ASK_PAGE_SIZE} OFFSET ${offset}`);
+    ORDER BY ${tierSql}, scored.score DESC, m.sent_at DESC NULLS LAST, m.id DESC LIMIT ${ASK_PAGE_SIZE} OFFSET ${offset}`);
   const total = rows.rows[0]?.total ?? (offset ? offset : 0);
   const nextOffset = offset + rows.rows.length < total ? offset + rows.rows.length : null;
 
@@ -381,7 +392,9 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
         review: r.is_read ? 'read' : 'missed',
         content_revision: r.content_revision,
         score: r.score,
-        exact: r.exact,
+        exact: r.tier === 0,
+        // How it matched: the list shows the three tiers in this order.
+        match: (['exact', 'partial', 'meaning'] as const)[r.tier],
         topic_paths: placementRows.filter((p) => p.messageId === r.id && trees.get(r.chat_id)?.nodes.has(p.topicId)).map((p) => pathOf(trees.get(r.chat_id)!, p.topicId)),
         route: `/chats/${r.chat_id}/messages/${r.id}`,
         context: context.get(r.id) ?? {},
@@ -456,7 +469,7 @@ export async function answerQuestion(
     const ctx = around.get(r.id);
     const context = [ctx?.before, ctx?.after].filter((c): c is ContextLine => !!c).map((c) => `(${c.rel}) ${c.sender}: ${c.text.slice(0, 160)}`);
     // Contains exactly what was asked: the answer must cite it (see answerPrompt).
-    const exact = asked.length > 1 && normalizeSearch(text).includes(asked);
+    const exact = hasExactWords(normalizeSearch(text), asked);
     const m = { ref: `m${messages.length + 1}`, chat: titleOf.get(r.chatId)!, sender: r.sender, time: r.sentAt ? r.sentAt.toISOString().slice(0, 16) : null, text, ...(exact ? { exact: true } : {}), ...(context.length ? { context } : {}) };
     // The matches take at most half of the first part; the summaries need the rest.
     if (used + cost(m) > base + limit / 2) break;

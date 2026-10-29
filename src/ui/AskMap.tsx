@@ -49,6 +49,8 @@ export interface AskResult {
     topic_paths: PathItem[][];
     /** Contains exactly what was asked (listed first). */
     exact?: boolean;
+    /** exact: the asked words as whole words; partial: a typed word inside a longer word; meaning: the rest. */
+    match?: 'exact' | 'partial' | 'meaning';
     /** The messages around it: the one it replies to (or the one before), the reply (or the one after). */
     context?: { before?: AskContextLine; after?: AskContextLine };
   }[];

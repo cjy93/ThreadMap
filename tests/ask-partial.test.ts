@@ -111,4 +111,19 @@ describe('Ask: part of a word, ranked by what was typed, with context', () => {
     const tool = r.results.find((x) => x.message_id === ids.tool)!;
     expect(tool.context.after).toMatchObject({ rel: 'reply', text: expect.stringContaining('What is this for') });
   });
+
+  // Last: it changes two of the messages the tests above count.
+  it('orders exact matches, then partial ones, then those found by meaning', async () => {
+    const set = (id: string, body: string) => t.db.update(s.messages).set({ body, searchText: normalizeSearch(body) }).where(eq(s.messages.id, id));
+    await set(ids.noise7, 'the clip is ready');
+    await set(ids.noise6, 'video of the demo');
+    const r = await ask(t.db, auth, params('clip'), async () => ({ interpretation: 'a clip', terms: ['clip', 'video'], topicIds: [] }));
+    expect(r.results.slice(0, 2).map((x) => [x.message_id, x.match])).toEqual([
+      [ids.noise7, 'exact'],
+      [ids.tool, 'partial'],
+    ]);
+    // Then everything found by meaning (the "video" messages), never above a partial match.
+    expect(r.results.slice(2).every((x) => x.match === 'meaning')).toBe(true);
+    expect(r.results.find((x) => x.message_id === ids.noise6)?.match).toBe('meaning');
+  });
 });
