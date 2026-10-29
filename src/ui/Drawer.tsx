@@ -50,28 +50,6 @@ function MediaView({ a, onFetch }: { a: MediaItem; onFetch: (id: string) => void
   );
 }
 
-/**
- * The message a reply quotes, shown above it like WhatsApp does; opens it when it is clickable on
- * its own. `inferred`: no WhatsApp reply, but Nemotron read it as answering that message.
- */
-function Quote({ q, onOpen, inferred }: { q: { sender: string; snippet: string | null }; onOpen?: () => void; inferred?: boolean }) {
-  const body = (
-    <>
-      <strong>{inferred ? '↪ answers' : '↩'} {q.sender}</strong> {q.snippet ? q.snippet.slice(0, 160) : '(removed)'}
-    </>
-  );
-  const title = inferred ? 'Answers this earlier message (worked out by Nemotron; Reply was not used)' : 'The message this replies to';
-  return onOpen ? (
-    <button className={`quote ${inferred ? 'inferred' : ''}`} title={`${title}. Click to open it.`} onClick={onOpen}>
-      {body}
-    </button>
-  ) : (
-    <div className={`quote ${inferred ? 'inferred' : ''}`} title={title}>
-      {body}
-    </div>
-  );
-}
-
 // Messages per page of the Chatroom (as the server sends them).
 const CHATROOM_PAGE = 15;
 
@@ -188,25 +166,8 @@ export function SourceView({
   const [m, setM] = useState<SourceMessage | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [fileState, setFileState] = useState<Record<string, string>>({});
-  const threadBox = useRef<HTMLElement>(null);
-  // Below the message: its whole discussion, or its WhatsApp reply chain (what it replies to and the replies to it).
-  const [around, setAround] = useState<'chain' | 'chatroom' | 'topic'>('chain');
-  // Topic thread: more of the chat loaded above and below it on request.
-  const [lead, setLead] = useState<SourceMessage['context']>([]);
-  const [tail, setTail] = useState<SourceMessage['context']>([]);
-  const [leadMore, setLeadMore] = useState(true);
-  const [tailMore, setTailMore] = useState(true);
-  const loadAround = async (dir: 'before' | 'after', from: string) => {
-    const r = await api<{ messages: SourceMessage['context']; more: boolean }>(`/api/messages/${from}/chatroom?dir=${dir}`).catch(() => null);
-    if (!r) return;
-    if (dir === 'before') {
-      setLead((cur) => [...r.messages, ...cur]);
-      setLeadMore(r.more);
-    } else {
-      setTail((cur) => [...cur, ...r.messages]);
-      setTailMore(r.more);
-    }
-  };
+  // Below the message: its reply chain (what it replies to and the replies to it), or the chat in time order.
+  const [around, setAround] = useState<'chain' | 'chatroom'>('chain');
   const load = useCallback(() => {
     api<SourceMessage>(`/api/messages/${messageId}`).then(setM, (e: Error) => setErr(e.message));
   }, [messageId]);
@@ -229,13 +190,6 @@ export function SourceView({
       live = false;
     };
   }, [needsAnswers, messageId, load]);
-  // The discussion list opens scrolled to this message.
-  const threadLoaded = Boolean(m?.thread) && around === 'topic';
-  useEffect(() => {
-    const box = threadBox.current;
-    const cur = box?.querySelector<HTMLElement>('[aria-current="true"]');
-    if (box && cur) box.scrollTop = cur.offsetTop - box.offsetTop - 60;
-  }, [threadLoaded]);
 
   // Dwell timer: pauses/resets when hidden, unfocused, closed, or revision changes.
   useEffect(() => {
@@ -331,7 +285,7 @@ export function SourceView({
           {m.review === 'missed' && !suppressed ? <span className="counts"> · marks Read after 2 s in view</span> : null}
         </p>
       ) : null}
-      {/* What surrounds this message: its reply chain, the chat in time order, or Nemotron's grouping. */}
+      {/* What surrounds this message: its reply chain, or the chat in time order. */}
       <div className="seg" role="group" aria-label="Show around this message" style={{ marginTop: 8 }}>
         <button
           aria-pressed={around === 'chain'}
@@ -343,14 +297,15 @@ export function SourceView({
         <button aria-pressed={around === 'chatroom'} onClick={() => setAround('chatroom')} title="The chat in time order, as in WhatsApp: scroll up or down for more">
           Chatroom
         </button>
-        {m.thread ? (
-          <button aria-pressed={around === 'topic'} onClick={() => setAround('topic')} title="The messages Nemotron grouped into this message's discussion, wherever they are in the chat">
-            Topic thread
-          </button>
-        ) : null}
       </div>
       {around === 'chain' ? (
         <section aria-label="Discussion: reply chain" className="thread thread-catalog">
+          {/* The subject Nemotron filed this message under, and how many messages it grouped there. */}
+          {m.thread ? (
+            <h4 className="discussion-title">
+              Discussion: {m.thread.title} <span className="counts">· {m.thread.messages.length} messages</span>
+            </h4>
+          ) : null}
           {needsAnswers ? <p className="counts">{answersNote ?? 'NVIDIA Nemotron is finding which messages answer which (when Reply was not used)…'}</p> : null}
           {m.reply_chain.before.length ? <div className="thread-label">Replied to, earliest first</div> : null}
           {m.reply_chain.before.map((c) => (
@@ -368,83 +323,8 @@ export function SourceView({
           ))}
           {!chainCount && !needsAnswers ? <p className="counts">No replies to or from this message, including answers given without Reply. See it in the Chatroom.</p> : null}
         </section>
-      ) : around === 'chatroom' || !m.thread ? (
-        <Chatroom key={m.message_id} first={m.context} tz={tz} onOpen={(id) => onOpenMessage(m.chat.id, id)} />
       ) : (
-        <section aria-label="The whole discussion" className="thread thread-catalog" ref={threadBox}>
-          {(() => {
-            const top = lead[0] ?? m.thread.before[0] ?? m.thread.messages[0];
-            return leadMore && top ? (
-              <button className="thread-label" onClick={() => void loadAround('before', top.message_id)}>
-                ↑ Load earlier messages
-              </button>
-            ) : (
-              <div className="thread-label">Start of the saved chat</div>
-            );
-          })()}
-          {lead.length || m.thread.before.length ? (
-            <>
-              <div className="thread-label">Earlier in the chat</div>
-              {[...lead, ...m.thread.before].map((c) => (
-                <div key={c.message_id} className={`tmsg earlier ${c.direction === 'outgoing' ? 'mine' : ''}`} {...openOnDoubleClick(() => onOpenMessage(m.chat.id, c.message_id))}>
-                  <div className="meta">
-                    <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
-                  </div>
-                  {c.snippet ?? '(removed)'}
-                </div>
-              ))}
-            </>
-          ) : null}
-          <h4 style={{ margin: '0 0 4px' }}>
-            Discussion: {m.thread.title} <span className="counts">· {m.thread.messages.length} messages</span>
-          </h4>
-          {needsAnswers ? <p className="counts">{answersNote ?? 'NVIDIA Nemotron is finding which messages answer which (when Reply was not used)…'}</p> : null}
-          {m.thread.messages.map((c) =>
-            c.current ? (
-              <div key={c.message_id} className={`tmsg current ${c.direction === 'outgoing' ? 'mine' : ''}`} aria-current="true">
-                <div className="meta">
-                  <strong>{c.sender}</strong> · {time(c.sent_at, tz)} · this message
-                </div>
-                {c.reply_to ? <Quote q={c.reply_to} onOpen={() => onOpenMessage(m.chat.id, c.reply_to!.message_id)} /> : null}
-                {c.answers ? <Quote q={c.answers} inferred onOpen={() => onOpenMessage(m.chat.id, c.answers!.message_id)} /> : null}
-                {c.snippet ?? '(removed)'}
-              </div>
-            ) : (
-              <div
-                key={c.message_id}
-                className={`tmsg ${c.direction === 'outgoing' ? 'mine' : ''} ${c.filler ? 'filler' : ''}`}
-                {...openOnDoubleClick(() => onOpenMessage(m.chat.id, c.message_id))}
-                title={c.filler ? 'Small talk: kept here, left off the map. Double-click to open.' : 'Double-click to open. Select words to copy them.'}
-              >
-                <div className="meta">
-                  <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
-                </div>
-                {c.reply_to ? <Quote q={c.reply_to} /> : null}
-                {c.answers ? <Quote q={c.answers} inferred /> : null}
-                {c.snippet ?? '(removed)'}
-              </div>
-            ),
-          )}
-          {tail.length ? <div className="thread-label">Later in the chat</div> : null}
-          {tail.map((c) => (
-            <div key={c.message_id} className={`tmsg earlier ${c.direction === 'outgoing' ? 'mine' : ''}`} {...openOnDoubleClick(() => onOpenMessage(m.chat.id, c.message_id))}>
-              <div className="meta">
-                <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
-              </div>
-              {c.snippet ?? '(removed)'}
-            </div>
-          ))}
-          {(() => {
-            const bottom = tail.at(-1) ?? m.thread.messages.at(-1);
-            return tailMore && bottom ? (
-              <button className="thread-label" onClick={() => void loadAround('after', bottom.message_id)}>
-                ↓ Load later messages
-              </button>
-            ) : (
-              <div className="thread-label">Latest saved message</div>
-            );
-          })()}
-        </section>
+        <Chatroom key={m.message_id} first={m.context} tz={tz} onOpen={(id) => onOpenMessage(m.chat.id, id)} />
       )}
       <p className="counts">
         Permalink: <code>/chats/{m.chat.id}/messages/{m.message_id}</code>
