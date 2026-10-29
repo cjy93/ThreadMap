@@ -1,8 +1,8 @@
 // Web-process fan-out of committed change notifications (pg LISTEN) to
 // authenticated SSE subscribers, scoped by workspace. QR payloads are kept only
 // in bounded memory until expiry and are surfaced only to the owner workspace.
-import pg from 'pg';
-import { pgSslOptions } from './db';
+import type pg from 'pg';
+import { listenForever } from './listen';
 import { ASK_REPLY_CHANNEL, EVENTS_CHANNEL, QR_CHANNEL, type ChangeEvent } from './notify';
 
 type Listener = (ev: { type: string; data: unknown }) => void;
@@ -29,8 +29,8 @@ interface Hub {
   // Replies still on their way when the web request stopped waiting: the worker carries on, and
   // the page collects the result here a little later (owner workspace only, kept briefly).
   late?: Map<string, LateReply>;
-  client?: pg.Client;
-  starting?: Promise<void>;
+  // The self-healing LISTEN connection, once started.
+  listening?: Promise<unknown>;
 }
 
 const g = globalThis as unknown as { __tmHub?: Hub };
@@ -40,52 +40,42 @@ function emit(ws: string, ev: { type: string; data: unknown }) {
   for (const l of hub.subs.get(ws) ?? []) l(ev);
 }
 
-async function start(): Promise<void> {
-  if (hub.client) return;
-  if (hub.starting) return hub.starting;
-  hub.starting = (async () => {
-    const client = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: pgSslOptions(), application_name: 'threadmap-web-listen' });
-    client.on('error', () => {
-      hub.client = undefined;
-      hub.starting = undefined;
-      // Subscribers refetch by version on their next notice; reconnect shortly.
-      setTimeout(() => void start().catch(() => undefined), 2000);
-    });
-    await client.connect();
-    await client.query(`LISTEN ${EVENTS_CHANNEL}`);
-    await client.query(`LISTEN ${QR_CHANNEL}`);
-    await client.query(`LISTEN ${ASK_REPLY_CHANNEL}`);
-    client.on('notification', (n) => {
-      try {
-        const payload = JSON.parse(n.payload ?? '{}');
-        if (n.channel === ASK_REPLY_CHANNEL) {
-          const { id, ...rest } = payload as { id: string } & WorkerReply;
-          hub.asks?.get(id)?.(rest as WorkerReply);
-          return;
-        }
-        if (n.channel === QR_CHANNEL) {
-          const { ws, qr, code, ttlMs } = payload as { ws: string; qr: string | null; code?: string; ttlMs?: number };
-          hub.codes ??= new Map();
-          if (code) hub.codes.set(ws, { code, expiresAt: Date.now() + Math.min(ttlMs ?? 180_000, 300_000) });
-          else if (!qr) hub.codes.delete(ws);
-          if (qr) hub.qr.set(ws, { qr, expiresAt: Date.now() + Math.min(ttlMs ?? 60_000, 120_000) });
-          else hub.qr.delete(ws);
-          emit(ws, { type: 'qr', data: { available: Boolean(qr) } });
-          return;
-        }
-        const ev = payload as ChangeEvent;
-        emit(ev.ws, { type: 'change', data: { kind: ev.kind, chatId: ev.chatId, version: ev.version, userId: ev.userId } });
-      } catch {
-        /* ignore malformed notices */
-      }
-    });
-    hub.client = client;
-  })();
+function onNotification(n: pg.Notification) {
   try {
-    await hub.starting;
-  } finally {
-    hub.starting = undefined;
+    const payload = JSON.parse(n.payload ?? '{}');
+    if (n.channel === ASK_REPLY_CHANNEL) {
+      const { id, ...rest } = payload as { id: string } & WorkerReply;
+      hub.asks?.get(id)?.(rest as WorkerReply);
+      return;
+    }
+    if (n.channel === QR_CHANNEL) {
+      const { ws, qr, code, ttlMs } = payload as { ws: string; qr: string | null; code?: string; ttlMs?: number };
+      hub.codes ??= new Map();
+      if (code) hub.codes.set(ws, { code, expiresAt: Date.now() + Math.min(ttlMs ?? 180_000, 300_000) });
+      else if (!qr) hub.codes.delete(ws);
+      if (qr) hub.qr.set(ws, { qr, expiresAt: Date.now() + Math.min(ttlMs ?? 60_000, 120_000) });
+      else hub.qr.delete(ws);
+      emit(ws, { type: 'qr', data: { available: Boolean(qr) } });
+      return;
+    }
+    const ev = payload as ChangeEvent;
+    emit(ev.ws, { type: 'change', data: { kind: ev.kind, chatId: ev.chatId, version: ev.version, userId: ev.userId } });
+  } catch {
+    /* ignore malformed notices */
   }
+}
+
+async function start(): Promise<void> {
+  hub.listening ??= listenForever({
+    url: process.env.DATABASE_URL,
+    application: 'threadmap-web-listen',
+    channels: [EVENTS_CHANNEL, QR_CHANNEL, ASK_REPLY_CHANNEL],
+    onNotification,
+  }).catch((e: unknown) => {
+    hub.listening = undefined;
+    throw e;
+  });
+  await hub.listening;
 }
 
 export async function subscribe(ws: string, l: Listener): Promise<() => void> {

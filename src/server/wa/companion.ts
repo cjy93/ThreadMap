@@ -4,13 +4,13 @@
 import crypto from 'node:crypto';
 import makeWASocket, { Browsers, DisconnectReason, downloadMediaMessage, fetchLatestWaWebVersion, makeCacheableSignalKeyStore, type WAMessageKey, type WASocket, type WAVersion } from 'baileys';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import pg from 'pg';
 import pino from 'pino';
 import * as s from '../../db/schema';
 import type { WhatsAppConfig } from '../../lib/config';
 import { COMMAND_CHANNEL } from '../api/connector';
 import { EncryptionKeyError, openPacked, sealPacked } from '../crypto';
-import { pgSslOptions, type Db } from '../db';
+import type { Db } from '../db';
+import { listenForever } from '../listen';
 import { DIRECT_PLACEHOLDER, ingestEvents, LEGACY_DIRECT_PLACEHOLDER, type IngestContext } from '../ingest/ingest';
 import { bareJid } from '../ingest/normalize';
 import { nativeToNormalized } from '../ingest/native';
@@ -605,7 +605,7 @@ export class Companion {
   private sessions = new Map<string, Session>();
   // Phone numbers to link by pairing code instead of QR, per linked account (until linked or cancelled).
   readonly pairPhones = new Map<string, string>();
-  private listener?: pg.Client;
+  private stopListening?: () => void;
   private loop?: ReturnType<typeof setInterval>;
   private busy = false;
 
@@ -620,10 +620,7 @@ export class Companion {
       .update(s.connectionStatus)
       .set({ state: 'disconnected', detail: 'ThreadMap restarted during linking. Show a new QR code to continue.', updatedAt: new Date() })
       .where(eq(s.connectionStatus.state, 'pairing'));
-    this.listener = new pg.Client({ connectionString: this.deps.dbUrl, ssl: pgSslOptions(), application_name: 'threadmap-companion-cmd' });
-    await this.listener.connect();
-    await this.listener.query(`LISTEN ${COMMAND_CHANNEL}`);
-    this.listener.on('notification', () => void this.tick());
+    this.stopListening = await listenForever({ url: this.deps.dbUrl, application: 'threadmap-companion-cmd', channels: [COMMAND_CHANNEL], onNotification: () => void this.tick() });
     this.loop = setInterval(() => void this.tick(), 5000);
     await this.tick();
     log('started', { instance: this.instanceId.slice(0, 18) });
@@ -805,6 +802,6 @@ export class Companion {
     if (this.loop) clearInterval(this.loop);
     for (const sess of this.sessions.values()) await sess.stop('reconnecting', 'Companion restarting.').catch(() => undefined);
     this.sessions.clear();
-    await this.listener?.end().catch(() => undefined);
+    this.stopListening?.();
   }
 }

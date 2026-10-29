@@ -9,6 +9,7 @@ import { loadFixtureBundle } from '../fixtures/source';
 import { dispatchOutbox, maybeScheduleInitialTaxonomy, resumeStrandedBuilds, runJob, type PipelineDeps } from '../server/ai/pipeline';
 import { NebiusModelProvider, type ModelProvider, type Role } from '../server/ai/provider';
 import { getDb, pgSslOptions } from '../server/db';
+import { listenForever } from '../server/listen';
 import { purgeExpiredDemos } from '../server/demo';
 import { deleteAbandoned } from '../server/presence';
 import { sweepExpired } from '../server/ingest/ingest';
@@ -47,10 +48,7 @@ async function main() {
 
   // Ask: the web process sends questions here because only this process holds the model key.
   if (deps) {
-    const listener = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl: pgSslOptions(), application_name: 'threadmap-worker-ask' });
-    await listener.connect();
-    await listener.query(`LISTEN ${ASK_CHANNEL}`);
-    listener.on('notification', (n) => {
+    const onAsk = (n: pg.Notification) => {
       void (async () => {
         let id = '';
         try {
@@ -71,7 +69,8 @@ async function main() {
           if (id) await db.execute(sql`SELECT pg_notify(${ASK_REPLY_CHANNEL}, ${JSON.stringify({ id, ok: false, reason })})`).catch(() => undefined);
         }
       })();
-    });
+    };
+    await listenForever({ url: process.env.DATABASE_URL, application: 'threadmap-worker-ask', channels: [ASK_CHANNEL], onNotification: onAsk });
   }
 
   const enqueue = async (ids: string[]) => {

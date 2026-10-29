@@ -11,6 +11,7 @@ import { ingestEvents } from '../src/server/ingest/ingest';
 import { childEnv, CHILDREN } from '../src/processes/supervisor';
 import { clearAuthState, loadPgAuthState } from '../src/server/wa/auth-store';
 import { acquireLease, LeaseLostError } from '../src/server/wa/lease';
+import { listenForever } from '../src/server/listen';
 import { applySelections, deleteChat, ensureLinkedAccount, ensurePrivateWorkspace } from '../src/server/workspace';
 import { createTestDb, createUser, type TestDb } from './helpers/db';
 
@@ -168,5 +169,24 @@ describe('supervisor environment allowlists', () => {
     expect(childEnv(CHILDREN[0], env).DB_POOL_MAX).toBe('2');
     expect(childEnv(CHILDREN[1], env).DB_POOL_MAX).toBe('5');
     expect(childEnv(CHILDREN[2], env).DB_POOL_MAX).toBe('2');
+  });
+});
+
+describe('self-healing LISTEN', () => {
+  it('reconnects after the server drops the connection and keeps receiving notices', async () => {
+    const got: string[] = [];
+    let connects = 0;
+    const stop = await listenForever({ url: t.url, application: 'tm-test-listen', channels: ['tm_test'], onNotification: (n) => got.push(n.payload ?? ''), onConnect: () => connects++ });
+    try {
+      await t.db.execute(sql`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'tm-test-listen'`);
+      const until = Date.now() + 10_000;
+      while (connects < 2 && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+      expect(connects).toBe(2);
+      await t.db.execute(sql`SELECT pg_notify('tm_test', 'after')`);
+      await new Promise((r) => setTimeout(r, 300));
+      expect(got).toContain('after');
+    } finally {
+      stop();
+    }
   });
 });
