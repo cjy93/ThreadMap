@@ -96,6 +96,8 @@ const likePattern = (t: string) => `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 // A word the owner typed outweighs the variants Nemotron adds: asked "Clip", the messages
 // saying "LiceClip" must not be pushed out by ones matching many added hackathon terms.
 const TYPED_TERM_WEIGHT = 5;
+// Results per page; the page asks for the next one (same terms, no new model call) as you scroll.
+export const ASK_PAGE_SIZE = 100;
 
 export interface ContextLine {
   sender: string;
@@ -230,7 +232,21 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   // and when Nemotron is merely slow it searches again with its reading once that arrives.
   let note: string | null = null;
   let pending: string | null = null;
-  if (chatIds.length) {
+  // A further page of the same search: the page sends back the terms and topics already used.
+  const offset = Math.max(0, Math.min(1_000_000, Number(params.get('offset')) || 0));
+  const given = params.get('terms_json');
+  if (given !== null && chatIds.length) {
+    const parsed = (() => {
+      try {
+        const v = JSON.parse(given) as unknown;
+        return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+      } catch {
+        return [];
+      }
+    })();
+    terms = [...new Set(parsed.map(normalizeSearch).filter((t) => t.length > 1))].slice(0, 32);
+    chosen = (params.get('topics') ?? '').split(',').filter((id) => [...trees.values()].some((t) => t.nodes.has(id)));
+  } else if (chatIds.length) {
     const lateId = params.get('interp');
     const got = lateId ? await lateInterpretation(ctx.workspaceId, lateId) : await interpret(ctx.workspaceId, chatIds, question).catch(() => null);
     let r: Interpretation | null = null;
@@ -248,23 +264,33 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
     }
   }
   const topicIds = chosen.flatMap((id) => [...trees.values()].flatMap((t) => descendants(t, id)));
-  if (!chatIds.length || (!terms.length && !topicIds.length)) return { query: question, interpretation, note, interpretation_pending: pending, terms, results: [], topics: [] };
+  if (!chatIds.length || (!terms.length && !topicIds.length)) return { query: question, interpretation, note, interpretation_pending: pending, terms, results: [], topics: [], total: 0, next_offset: null };
 
   const matching = matchingMessagesSql({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds }, filter);
   const typed = new Set(normalizeSearch(question).split(/\s+/));
   const termValues = terms.length ? sql.join(terms.map((t) => sql`(${t}, ${likePattern(t)}, ${typed.has(t) ? TYPED_TERM_WEIGHT : 1}::int)`), sql`, `) : sql`(NULL::text, NULL::text, 0)`;
   const topicArray = topicIds.length ? sql`ARRAY[${sql.join(topicIds.map((id) => sql`${id}::uuid`), sql`, `)}]` : sql`ARRAY[]::uuid[]`;
-  const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; sent_at: Date | null; is_read: boolean; content_revision: number; score: number }>(sql`
+  // Rare terms count more: someone searching usually wants a name or a term, not a common word.
+  // A term's weight is scaled from 1x (in every message searched) up to 2x (in just one), by how
+  // many of the searched messages it matches; a typed word still outweighs Nemotron's additions.
+  const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; sent_at: Date | null; is_read: boolean; content_revision: number; score: number; total: number }>(sql`
     WITH mt AS (${matching}), terms(t, p, w) AS (VALUES ${termValues}),
+    n AS (SELECT greatest(count(*), 2)::float AS n FROM mt),
+    ts AS (
+      SELECT terms.t, terms.p, terms.w,
+        greatest((SELECT count(*) FROM messages m JOIN mt ON mt.id = m.id WHERE ${termMatchSql(sql`terms.t`, sql`terms.p`)}), 1)::float AS df
+      FROM terms WHERE terms.p IS NOT NULL),
     scored AS (
       SELECT m.id,
-        (SELECT coalesce(sum(terms.w), 0) FROM terms WHERE terms.p IS NOT NULL AND ${termMatchSql(sql`terms.t`, sql`terms.p`)})::int
+        (SELECT coalesce(sum(ts.w * (1 + ln(n.n / least(ts.df, n.n)) / ln(n.n))), 0) FROM ts, n WHERE ${termMatchSql(sql`ts.t`, sql`ts.p`)})
         + CASE WHEN EXISTS (SELECT 1 FROM placements pl WHERE pl.message_id = m.id AND pl.topic_id = ANY(${topicArray})) THEN 2 ELSE 0 END AS score
       FROM messages m JOIN mt ON mt.id = m.id)
-    SELECT m.id, m.chat_id, m.sender_label, m.body, m.sent_at, mt.is_read, m.content_revision, scored.score
+    SELECT m.id, m.chat_id, m.sender_label, m.body, m.sent_at, mt.is_read, m.content_revision, scored.score::float AS score, count(*) OVER ()::int AS total
     FROM scored JOIN messages m ON m.id = scored.id JOIN mt ON mt.id = m.id
     WHERE scored.score > 0
-    ORDER BY scored.score DESC, m.sent_at DESC NULLS LAST, m.id DESC LIMIT 100`);
+    ORDER BY scored.score DESC, m.sent_at DESC NULLS LAST, m.id DESC LIMIT ${ASK_PAGE_SIZE} OFFSET ${offset}`);
+  const total = rows.rows[0]?.total ?? (offset ? offset : 0);
+  const nextOffset = offset + rows.rows.length < total ? offset + rows.rows.length : null;
 
   const context = await messageContext(db, rows.rows.map((r) => r.id));
   const placementRows = rows.rows.length
@@ -277,6 +303,10 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
     interpretation_pending: pending,
     terms,
     filter_fingerprint: filterFingerprint({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds }, filter),
+    // Every match counts; this page holds ASK_PAGE_SIZE of them from `offset`.
+    total,
+    offset,
+    next_offset: nextOffset,
     results: rows.rows.map((r) => {
       const body = r.body ?? '';
       const norm = normalizeSearch(body);

@@ -67,6 +67,10 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
   const [answer, setAnswer] = useState<AnswerState | null>(null);
   const [starred, setStarred] = useState<StarredState | null>(null);
   const askGen = useRef(0);
+  // The current search's parameters, to fetch further pages of its matches as the list scrolls.
+  const askParamsRef = useRef<Record<string, string | undefined> | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [asking, setAsking] = useState(false);
   const [olderNote, setOlderNote] = useState<string | null>(null);
@@ -318,6 +322,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
     let res: SearchResult;
     try {
       const askParams = { q: query, ...filterParams(viewFilter), chat: chatId ?? undefined };
+      askParamsRef.current = askParams;
       res = await api<SearchResult>(`/api/ask?${qs(askParams)}`);
       setSearchRes(res);
       setConceptMap(true);
@@ -355,6 +360,38 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
       if (my === askGen.current) setAnswer({ state: 'none', note: (err as Error).message });
     }
   };
+  // The next page of matches, with the same terms and topics (no new model call).
+  const nextOffset = searchRes?.next_offset ?? null;
+  const loadMore = useCallback(async () => {
+    if (nextOffset === null || loadingMore || !searchRes || !askParamsRef.current) return;
+    const my = askGen.current;
+    setLoadingMore(true);
+    try {
+      const more = await api<SearchResult>(
+        `/api/ask?${qs({ ...askParamsRef.current, terms_json: JSON.stringify(searchRes.terms), topics: searchRes.topics.map((t) => t.topic_id).join(','), offset: String(nextOffset) })}`,
+      );
+      if (my !== askGen.current) return;
+      setSearchRes((cur) => {
+        if (!cur) return cur;
+        const seen = new Set(cur.results.map((r) => r.message_id));
+        return { ...cur, results: [...cur.results, ...more.results.filter((r) => !seen.has(r.message_id))], total: more.total, next_offset: more.next_offset };
+      });
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [nextOffset, loadingMore, searchRes]);
+  // Reaching the end of the list loads the next page.
+  useEffect(() => {
+    const el = moreRef.current;
+    if (!el || nextOffset === null) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) void loadMore();
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [nextOffset, loadMore]);
+  // The Ask map stays readable: it draws the best matches (the first page), the list has them all.
+  const askMapRes = useMemo(() => (searchRes ? { ...searchRes, results: searchRes.results.slice(0, 100) } : null), [searchRes]);
   // A slow Nemotron reply: check every few seconds for up to five minutes, while this question is current.
   const waitForLate = async (my: number, id: string) => {
     for (let i = 0; i < 75 && my === askGen.current; i++) {
@@ -747,7 +784,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
           />
         ) : searchRes && conceptMap ? (
           <AskMap
-            res={searchRes}
+            res={askMapRes!}
             onBack={() => setConceptMap(false)}
             onOpenTopic={(cid, id) => {
               setConceptMap(false);
@@ -917,7 +954,11 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
               ))}
               {searchRes.results.length ? (
                 <div className="ask-section">
-                  From your chats · {searchRes.results.length} message{searchRes.results.length === 1 ? '' : 's'} · double-click to open
+                  From your chats ·{' '}
+                  {searchRes.total && searchRes.total > searchRes.results.length
+                    ? `${searchRes.results.length} of ${searchRes.total.toLocaleString('en-US')} messages`
+                    : `${searchRes.results.length} message${searchRes.results.length === 1 ? '' : 's'}`}{' '}
+                  · rarest words first · double-click to open
                 </div>
               ) : null}
               {searchRes.results.map((r) => (
@@ -937,6 +978,13 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                   <div className="path">{r.topic_paths.map((p) => p.map((x) => x.title).join(' › ')).join(' | ')}</div>
                 </div>
               ))}
+              {nextOffset !== null ? (
+                <div ref={moreRef} className="ask-more">
+                  <button disabled={loadingMore} onClick={() => void loadMore()}>
+                    {loadingMore ? 'Loading more…' : `Load more (${((searchRes.total ?? 0) - searchRes.results.length).toLocaleString('en-US')} left)`}
+                  </button>
+                </div>
+              ) : null}
               {!searchRes.results.length && !searchRes.topics.length ? <p className="counts">No matches under the current filters.</p> : null}
             </div>
           ) : selectedNode && chatId ? (

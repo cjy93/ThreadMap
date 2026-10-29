@@ -49,6 +49,10 @@ export interface AskResult {
     context?: { before?: AskContextLine; after?: AskContextLine };
   }[];
   topics: { chat_id: string; topic_id: string; path: PathItem[] }[];
+  /** Every match; `results` holds the pages loaded so far. */
+  total?: number;
+  /** Where the next page starts, or null when every match is loaded. */
+  next_offset?: number | null;
 }
 
 type Kind = 'query' | 'abstraction' | 'topic' | 'sibling' | 'detail' | 'concept';

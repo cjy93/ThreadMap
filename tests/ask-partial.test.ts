@@ -44,6 +44,25 @@ describe('Ask: part of a word, ranked by what was typed, with context', () => {
     expect(r.results[0].message_id).toBe(ids.tool);
   });
 
+  it('ranks a rare typed word above a common one', async () => {
+    // Both typed: "liceclip" is in one message, "showcase" in six.
+    const r = await ask(t.db, auth, params('showcase liceclip'), async () => ({ interpretation: null as unknown as string, terms: ['showcase', 'liceclip'], topicIds: [] }));
+    expect(r.results[0].message_id).toBe(ids.tool);
+    expect(r.results[0].score).toBeGreaterThan(r.results[1].score);
+  });
+
+  it('pages through every match with the same terms, without asking the model again', async () => {
+    const never = async () => {
+      throw new Error('a further page must not ask the model again');
+    };
+    const page = (offset: number) => ask(t.db, auth, new URLSearchParams({ q: 'showcase', chat: chatId, status: 'all', terms_json: JSON.stringify(['showcase']), offset: String(offset) }), never);
+    const first = await page(0);
+    expect(first.total).toBe(6);
+    expect(first.next_offset).toBeNull();
+    const rest = await page(4);
+    expect(rest.results.map((x) => x.message_id)).toEqual(first.results.slice(4).map((x) => x.message_id));
+  });
+
   it('gives each result the message around it, so a bare name says what it was about', async () => {
     const r = await ask(t.db, auth, params('Clip'), clipReading);
     const tool = r.results.find((x) => x.message_id === ids.tool)!;
