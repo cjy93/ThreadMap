@@ -498,7 +498,8 @@ async function applyMessage(tx: Tx, ctx: IngestContext, chat: ChatRow, e: Messag
   // Initial-history backfill cap (never applies to live arrivals).
   if (e.origin !== 'live') {
     const [cov] = await tx.select().from(s.syncCoverage).where(eq(s.syncCoverage.chatId, chat.id));
-    if (cov && cov.historyCount >= ctx.historyCapPerChat) {
+    const cap = chat.historyLimit ? Math.min(chat.historyLimit, ctx.historyCapPerChat) : ctx.historyCapPerChat;
+    if (cov && cov.historyCount >= cap) {
       stats.excludedHistoryCap++;
       if (cov.historyState !== 'limited') {
         await tx.update(s.syncCoverage).set({ historyState: 'limited' }).where(eq(s.syncCoverage.chatId, chat.id));

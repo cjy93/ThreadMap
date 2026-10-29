@@ -706,3 +706,6 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .chip-toggle { cursor: pointer; font: inherit; font-size: 13px; }
 .chip-toggle[aria-pressed='true'] { background: var(--knowledge); border-color: var(--knowledge); color: var(--accent-ink); }
 .chip-note { margin-top: 8px; }
+/* Opening a chat: how many of its newest older messages to import. */
+.open-limit { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; font-size: 13px; }
+.open-limit input { width: 90px; }

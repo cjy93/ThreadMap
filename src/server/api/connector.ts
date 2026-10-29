@@ -3,7 +3,7 @@
 // browser can never invoke arbitrary Baileys methods.
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import * as s from '../../db/schema';
-import { loadAppConfig } from '../../lib/config';
+import { loadAppConfig, loadWhatsAppConfig } from '../../lib/config';
 import { analyseSide, mapNeedsTidy, rebuildMapFromScratch, requestRebuild, rereadChatFromScratch, resumePausedFrontiers, type MapSide } from '../ai/pipeline';
 import type { Db } from '../db';
 import { notifyChange } from '../notify';
@@ -93,6 +93,7 @@ export async function connectionStatus(db: Db, ctx: AuthCtx) {
   return {
     mode: 'private',
     pairing_allowed: loadAppConfig().WHATSAPP_PAIRING_ENABLED,
+    history_max: loadWhatsAppConfig().WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT,
     desired_state: la.desiredState,
     connection: {
       state: st?.state ?? 'disconnected',
@@ -206,12 +207,15 @@ export async function avatarContent(db: Db, ctx: AuthCtx, chatId: string) {
 
 export async function putSelections(db: Db, ctx: AuthCtx, body: unknown) {
   ownerOnly(ctx);
-  const items = ((body as { selections?: unknown })?.selections ?? []) as { chat_id?: unknown; selected?: unknown; history_mode?: unknown }[];
+  const items = ((body as { selections?: unknown })?.selections ?? []) as { chat_id?: unknown; selected?: unknown; history_mode?: unknown; history_limit?: unknown }[];
   if (!Array.isArray(items) || items.length > 500) throw new SafeError('invalid selections');
   const parsed = items.map((i) => {
     if (!isUuid(i.chat_id) || typeof i.selected !== 'boolean') throw new SafeError('invalid selection item');
     if (i.history_mode !== undefined && i.history_mode !== 'available_history' && i.history_mode !== 'new_only') throw new SafeError('invalid history mode');
-    return { chatId: i.chat_id, selected: i.selected, historyMode: i.history_mode as 'available_history' | 'new_only' | undefined };
+    const limit = i.history_limit;
+    if (limit !== undefined && limit !== null && !(Number.isInteger(limit) && (limit as number) >= 1)) throw new SafeError('invalid history limit');
+    const max = loadWhatsAppConfig().WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT;
+    return { chatId: i.chat_id, selected: i.selected, historyMode: i.history_mode as 'available_history' | 'new_only' | undefined, historyLimit: typeof limit === 'number' ? Math.min(limit, max) : null };
   });
   // Chats being opened now (not already open), for the history backfill below.
   const picked = parsed.filter((p) => p.selected).map((p) => p.chatId);
@@ -301,9 +305,13 @@ export async function requestHistory(db: Db, ctx: AuthCtx, chatId: string) {
   if (chat.sourceKind !== 'whatsapp' || !chat.selected) throw new SafeError('history requests apply to selected WhatsApp chats only');
   // Older pages past the per-chat history limit would be dropped on arrival; say so instead.
   const [cov] = await db.select().from(s.syncCoverage).where(eq(s.syncCoverage.chatId, chat.id));
-  if (cov?.historyState === 'limited') {
+  const max = loadWhatsAppConfig().WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT;
+  if (cov && cov.historyCount >= max) {
     return { limited: true, note: `This chat already has the ${cov.historyCount.toLocaleString('en-US')} older messages ThreadMap keeps per chat (WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT). Raise that limit to load more.` };
   }
+  // The limit chosen when the chat was opened only bounds the first import: Load older goes on to the cap.
+  if (chat.historyLimit !== null) await db.update(s.chats).set({ historyLimit: null }).where(eq(s.chats.id, chat.id));
+  if (cov?.historyState === 'limited') await db.update(s.syncCoverage).set({ historyState: 'receiving' }).where(eq(s.syncCoverage.chatId, chat.id));
   // Every older page the phone still has, up to the per-chat cap.
   const cmd = await enqueueCommand(db, ctx, 'request_history', { chatId, backfill: true });
   return { command_id: cmd.id, note: 'Older history is best-effort; WhatsApp may return partial or no results.' };

@@ -3,7 +3,7 @@
 // filter, count and projection code. Nothing here calls a model.
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import * as s from '../../db/schema';
-import { loadViewConfig, type ViewConfig } from '../../lib/config';
+import { type ViewConfig, loadViewConfig, loadWhatsAppConfig } from '../../lib/config';
 import { nodeDiameter } from '../../lib/sizing';
 import type { Db, DbOrTx } from '../db';
 import { nodeContent } from '../graph/content';
@@ -177,7 +177,8 @@ export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSe
         await tx.execute<{ at: Date | null; loading: boolean }>(sql`SELECT max(created_at) AS at, COALESCE(max(created_at) > now() - interval '3 minutes', false) AS loading FROM connector_commands WHERE workspace_id = ${ctx.workspaceId}::uuid AND type = 'request_history' AND payload->>'chatId' = ${chatId}`)
       ).rows;
       // At the per-chat history limit (WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT): older pages would be dropped.
-      const [cov] = await tx.select({ state: s.syncCoverage.historyState, n: s.syncCoverage.historyCount }).from(s.syncCoverage).where(eq(s.syncCoverage.chatId, chatId));
+      const [cov] = await tx.select({ n: s.syncCoverage.historyCount }).from(s.syncCoverage).where(eq(s.syncCoverage.chatId, chatId));
+      const historyMax = loadWhatsAppConfig().WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT;
       return {
         chat: { id: chat.id, title: chat.title, kind: chat.kind, source: chat.sourceKind },
         graph_version: g.g,
@@ -192,7 +193,7 @@ export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSe
         history_requested_at: hist?.at ? new Date(hist.at).toISOString() : null,
         // Asked within the last few minutes: the phone's answer may still be on its way.
         history_loading: Boolean(hist?.loading),
-        history_limited: cov?.state === 'limited' ? cov.n : null,
+        history_limited: cov && cov.n >= historyMax ? cov.n : null,
         // Which map this is, and how far its analysis has got.
         side,
         analysis: await mapAnalysis(tx, mapId),

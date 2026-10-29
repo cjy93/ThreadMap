@@ -427,8 +427,12 @@ class Session {
   async backfillHistory(chatId: string) {
     if (this.backfilling.has(chatId)) return { ok: true, already: true };
     this.backfilling.add(chatId);
-    const cap = this.c.deps.cfg.WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT;
-    const count = async () => (await this.db.execute<{ n: number }>(sql`SELECT count(*)::int AS n FROM messages WHERE chat_id = ${chatId}::uuid`)).rows[0].n;
+    // The chat's own limit (chosen when it was opened), never above the deployment's cap.
+    const max = this.c.deps.cfg.WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT;
+    const [own] = (await this.db.execute<{ n: number | null }>(sql`SELECT history_limit AS n FROM chats WHERE id = ${chatId}::uuid`)).rows;
+    const cap = own?.n ? Math.min(own.n, max) : max;
+    // Older messages only: new ones arriving live never count toward the limit.
+    const count = async () => (await this.db.execute<{ n: number }>(sql`SELECT COALESCE((SELECT history_count FROM sync_coverage WHERE chat_id = ${chatId}::uuid), 0)::int AS n`)).rows[0].n;
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
     let pages = 0;
     try {

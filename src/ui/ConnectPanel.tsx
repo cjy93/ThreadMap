@@ -9,6 +9,8 @@ import { api, leaveAndDeleteAccount } from './client';
 interface Status {
   mode: 'private' | 'demo';
   pairing_allowed: boolean;
+  /** Most older messages ThreadMap imports per chat (WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT). */
+  history_max?: number;
   desired_state?: string;
   connection: { state: string; detail: string | null; last_event_at?: string | null; heartbeat_at?: string | null; uncertain_intervals?: { from: string; to: string }[]; relink_required?: boolean; remote_unlink_confirmed?: boolean | null };
   companion_heartbeat_at?: string | null;
@@ -65,6 +67,8 @@ export function ConnectPanel({
   const [chats, setChats] = useState<Discovered[]>([]);
   // The chat whose first open is being set up (storage, history, analysis).
   const [opening, setOpening] = useState<string | null>(null);
+  // Opening a chat first asks how many of its newest older messages to import.
+  const [limitFor, setLimitFor] = useState<{ id: string; value: string } | null>(null);
   const [kind, setKind] = useState<'all' | 'group' | 'direct'>('all');
   // Profile photos are requested only for rows that scroll into view, in small batches.
   const askedAvatars = useRef(new Set<string>());
@@ -194,11 +198,12 @@ export function ConnectPanel({
   };
   // Opening a chat is the choice: the first open starts storing it, fetches its
   // history and queues NVIDIA Nemotron analysis, then shows its map as it fills.
-  const open = async (ch: Discovered) => {
+  const open = async (ch: Discovered, historyLimit?: number) => {
     if (!ch.selected) {
       setOpening(ch.id);
+      setLimitFor(null);
       try {
-        await api('/api/whatsapp/selections', { method: 'PUT', json: { selections: [{ chat_id: ch.id, selected: true }] } });
+        await api('/api/whatsapp/selections', { method: 'PUT', json: { selections: [{ chat_id: ch.id, selected: true, ...(historyLimit ? { history_limit: historyLimit } : {}) }] } });
       } catch (e) {
         setOpening(null);
         setMsg(e instanceof Error ? e.message : 'Could not open this chat.');
@@ -376,9 +381,45 @@ export function ConnectPanel({
                           <td className="counts">{ch.kind === 'group' ? 'Group' : 'Person'}</td>
                           <td className="counts">{lastMessageLabel(ch.last_message_at)}</td>
                           <td align="right">
-                            <button aria-label={`Open ${ch.title}`} disabled={opening !== null} onClick={() => void open(ch)}>
-                              {opening === ch.id ? 'Opening…' : 'Open'}
-                            </button>
+                            {limitFor?.id === ch.id ? (
+                              <form
+                                className="open-limit"
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  const n = Math.round(Number(limitFor.value));
+                                  if (n >= 1) void open(ch, Math.min(n, st.history_max ?? n));
+                                }}
+                              >
+                                <label>
+                                  Import the newest{' '}
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={st.history_max}
+                                    required
+                                    autoFocus
+                                    aria-label={`Older messages to import for ${ch.title}`}
+                                    value={limitFor.value}
+                                    onChange={(e) => setLimitFor({ id: ch.id, value: e.target.value })}
+                                  />{' '}
+                                  older messages{st.history_max ? ` (up to ${st.history_max.toLocaleString('en-US')})` : ''}
+                                </label>
+                                <button className="primary" disabled={opening !== null}>
+                                  Open
+                                </button>
+                                <button type="button" onClick={() => setLimitFor(null)}>
+                                  Cancel
+                                </button>
+                              </form>
+                            ) : (
+                              <button
+                                aria-label={`Open ${ch.title}`}
+                                disabled={opening !== null}
+                                onClick={() => (ch.selected ? void open(ch) : setLimitFor({ id: ch.id, value: String(st.history_max ?? 3000) }))}
+                              >
+                                {opening === ch.id ? 'Opening…' : 'Open'}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );

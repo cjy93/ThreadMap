@@ -252,6 +252,8 @@ export const chats = pgTable(
       .notNull()
       .default('available_history'),
     newOnlyCutoff: ts('new_only_cutoff'),
+    // Older messages to import for this chat, chosen when it was opened; null = the deployment's cap.
+    historyLimit: integer('history_limit'),
     // Excluded = deleted by the user; replay may not recreate content until reselected.
     excluded: boolean('excluded').notNull().default(false),
     deletionGeneration: integer('deletion_generation').notNull().default(0),

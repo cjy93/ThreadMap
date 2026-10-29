@@ -29,6 +29,8 @@ export interface SelectionInput {
   chatId: string;
   selected: boolean;
   historyMode?: 'available_history' | 'new_only';
+  /** When opening: how many older messages to import (null = the deployment's cap). */
+  historyLimit?: number | null;
 }
 
 /**
@@ -60,7 +62,7 @@ export async function applySelections(db: Db, workspaceId: string, items: Select
             // A fresh cutoff only when switching to new-only; never silently shifted.
             newOnlyCutoff: mode === 'new_only' ? (c.historyMode === 'new_only' && c.newOnlyCutoff ? c.newOnlyCutoff : now) : null,
             // First open: analyse the history arriving over the next few minutes; later messages wait for Refresh.
-            ...(reselect ? { autoAnalyzeUntil: new Date(now.getTime() + FIRST_OPEN_ANALYSIS_MS) } : {}),
+            ...(reselect ? { autoAnalyzeUntil: new Date(now.getTime() + FIRST_OPEN_ANALYSIS_MS), historyLimit: item.historyLimit ?? null } : {}),
           })
           .where(eq(s.chats.id, c.id))
           .returning();
