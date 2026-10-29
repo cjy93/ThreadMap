@@ -415,7 +415,7 @@ export function ConnectPanel({
                               <button
                                 aria-label={`Open ${ch.title}`}
                                 disabled={opening !== null}
-                                onClick={() => (ch.selected ? void open(ch) : setLimitFor({ id: ch.id, value: String(st.history_max ?? 3000) }))}
+                                onClick={() => (ch.selected ? void open(ch) : setLimitFor({ id: ch.id, value: String(Math.min(1000, st.history_max ?? 1000)) }))}
                               >
                                 {opening === ch.id ? 'Opening…' : 'Open'}
                               </button>
