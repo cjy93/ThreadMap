@@ -239,8 +239,8 @@ export function ConnectPanel({
   return (
     <div className="connect-page">
       <header className="connect-hero">
-        <div className="jkicker">How it works · guardrails · connect</div>
-        <h2>Connect WhatsApp</h2>
+        <div className="jkicker">Link · Choose · Map</div>
+        <h2>See your chat universe</h2>
         <p className="lede">Scan once with your phone, open the chats you want, and NVIDIA Nemotron turns each one into a mind map. Click a planet to see where your data goes and what protects it.</p>
       </header>
       {/* How it works and the guardrails at each stop: click a planet to read it. */}
