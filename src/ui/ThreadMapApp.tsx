@@ -994,6 +994,19 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
                   </p>
                   {smallTalk.items.map((m) => (
                     <div key={m.message_id} className="msg small-talk" {...openOnDoubleClick(() => onOpenMessage(m.chat_id, m.message_id))}>
+                      <button
+                        className="to-map"
+                        title="Put this message back on the map (your choice is kept)"
+                        onClick={async () => {
+                          // Off this list at once; the map and its counts reload.
+                          setSmallTalk((cur) => (cur && cur.items ? { ...cur, items: cur.items.filter((x) => x.message_id !== m.message_id), total: cur.total - 1 } : cur));
+                          await api(`/api/messages/${m.message_id}/small-talk`, { method: 'POST', json: { small: false } }).catch(() => undefined);
+                          void loadMap();
+                          void loadChats();
+                        }}
+                      >
+                        ↑ Move to map
+                      </button>
                       <strong>{m.sender}</strong> <span className={m.review === 'missed' ? 'missed' : 'readbadge'}>{m.review}</span>{' '}
                       <span className="counts">{m.sent_at ? new Date(m.sent_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : ''}</span>
                       <div>{m.snippet}</div>

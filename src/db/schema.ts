@@ -374,6 +374,8 @@ export const messages = pgTable(
     // Nemotron's verdict that the message adds nothing on its own ("ok", "lol", a throwaway
     // quip): kept in its discussion's thread but left off the map. null = not screened yet.
     filler: boolean('filler'),
+    // The owner's own choice (true: small talk, false: keep on the map); automatic screening never overrides it.
+    fillerOverride: boolean('filler_override'),
     // The earlier message this one answers when no WhatsApp reply says so (people often answer a
     // question from a few messages back without pressing Reply), as Nemotron read the discussion.
     inferredReplyTo: uuid('inferred_reply_to').references((): AnyPgColumn => messages.id, { onDelete: 'set null' }),

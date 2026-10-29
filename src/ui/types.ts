@@ -140,6 +140,8 @@ export interface SourceMessage {
   content_revision: number;
   review: 'read' | 'missed';
   reviewable: boolean;
+  /** Left off the map as small talk (by the rules, or moved there by the owner). */
+  small_talk?: boolean;
   /** root: the category the topic is under (concept maps are offered for KNOWLEDGE and RESOURCES). */
   topic_paths: { primary: boolean; root?: string; path: PathItem[] }[];
   attachments: { id: string; media_type: string; mime: string | null; filename: string | null; size: number | null; availability: string; has_preview: boolean; description: string | null }[];

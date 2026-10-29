@@ -166,6 +166,8 @@ export function SourceView({
   const [m, setM] = useState<SourceMessage | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [fileState, setFileState] = useState<Record<string, string>>({});
+  // What happened after moving this message between the map and small talk.
+  const [moveNote, setMoveNote] = useState<string | null>(null);
   // Below the message: its reply chain (what it replies to and the replies to it), or the chat in time order.
   const [around, setAround] = useState<'chain' | 'chatroom'>('chain');
   const load = useCallback(() => {
@@ -221,6 +223,18 @@ export function SourceView({
   if (err) return <p role="alert">{err}</p>;
   if (!m) return <p>Loading source…</p>;
   const chainCount = m.reply_chain.before.length + m.reply_chain.after.length;
+  // Move this message off the map as small talk, or back onto the map (the owner's choice is kept).
+  const moveSmallTalk = async (small: boolean) => {
+    setMoveNote(null);
+    try {
+      const r = await api<{ placed: boolean }>(`/api/messages/${messageId}/small-talk`, { method: 'POST', json: { small } });
+      if (!small && !r.placed) setMoveNote('Moved: it joins the map at the next Refresh.');
+    } catch (e) {
+      setMoveNote((e as Error).message);
+    }
+    load();
+    onChanged();
+  };
   const mark = async (status: 'read' | 'missed') => {
     if (status === 'missed') onSuppress(m.message_id);
     await api('/api/review', { method: 'POST', json: { message_id: m.message_id, status, revision: m.content_revision, source: 'manual' } });
@@ -281,7 +295,18 @@ export function SourceView({
       {m.reviewable ? (
         <p>
           Status: <strong className={m.review === 'missed' ? 'missed' : 'readbadge'}>{m.review === 'missed' ? 'Missed' : 'Read'}</strong>{' '}
-          <button onClick={() => mark('read')}>Mark Read</button> <button onClick={() => mark('missed')}>Mark Missed</button>
+          <button onClick={() => mark('read')}>Mark Read</button> <button onClick={() => mark('missed')}>Mark Missed</button>{' '}
+          {m.small_talk ? (
+            <button title="Put this message back on the map (your choice is kept)" onClick={() => void moveSmallTalk(false)}>
+              ↑ Move to map
+            </button>
+          ) : (
+            <button title="Take this message off the map as small talk (your choice is kept)" onClick={() => void moveSmallTalk(true)}>
+              ↓ Small talk
+            </button>
+          )}
+          {m.small_talk ? <span className="counts"> · small talk, off the map</span> : null}
+          {moveNote ? <span className="counts"> · {moveNote}</span> : null}
           {m.review === 'missed' && !suppressed ? <span className="counts"> · marks Read after 2 s in view</span> : null}
         </p>
       ) : null}
@@ -364,6 +389,17 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, r
   }, [load, refreshKey]);
   useEffect(() => setBulk(null), [nodeId, fp]);
 
+  // Take a message off the map as small talk, straight from the list.
+  const toSmallTalk = async (it: ContentMessage) => {
+    setItems((cur) => cur.filter((x) => !('message_id' in x && x.message_id === it.message_id && !('attachment_id' in x))));
+    try {
+      await api(`/api/messages/${it.message_id}/small-talk`, { method: 'POST', json: { small: true } });
+    } catch (e) {
+      setNote((e as Error).message);
+      void load();
+    }
+    onChanged();
+  };
   const markRead = async (it: ContentMessage) => {
     setItems((cur) => cur.map((x) => ('message_id' in x && x.message_id === it.message_id && !('attachment_id' in x) ? { ...x, review: 'read' as const } : x)));
     try {
@@ -511,12 +547,17 @@ export function NodeDrawer({ chatId, nodeId, filter, onOpenMessage, onChanged, r
                   )}
                   <div className="path">{it.topic_paths.map(pathText).join(' | ')}</div>
                 </div>
-                {/* Mark read straight from the list, without opening the message. */}
-                {it.review === 'missed' ? (
-                  <button className="mark-read" aria-label={`Mark message from ${it.sender} as read`} onClick={() => void markRead(it)}>
-                    ✓ Read
+                {/* Mark read, or move to small talk, straight from the list. */}
+                <div className="row-actions">
+                  {it.review === 'missed' ? (
+                    <button className="mark-read" aria-label={`Mark message from ${it.sender} as read`} onClick={() => void markRead(it)}>
+                      ✓ Read
+                    </button>
+                  ) : null}
+                  <button className="to-small" title="Take this message off the map as small talk (your choice is kept)" onClick={() => void toSmallTalk(it)}>
+                    ↓ Small talk
                   </button>
-                ) : null}
+                </div>
               </div>
             ),
           )

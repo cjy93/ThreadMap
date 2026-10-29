@@ -14,6 +14,7 @@ import { projectMap } from '../graph/projection';
 import { correctPlacement, editTopic, loadTree, pathOf } from '../graph/tree';
 import { createBulkSnapshot, executeBulk, setReview } from '../review';
 import { isUuid, normalizeSearch, SafeError } from '../util';
+import { notifyChange } from '../notify';
 
 export interface AuthCtx {
   userId: string;
@@ -402,6 +403,8 @@ export async function getMessage(db: Db, ctx: AuthCtx, messageId: string) {
     content_revision: m.contentRevision,
     review: isRead ? 'read' : 'missed',
     reviewable: !tombstoned && (m.kind === 'text' || m.kind === 'media'),
+    // Left off the map as small talk (by the rules, or because the owner moved it there).
+    small_talk: m.filler === true,
     topic_paths: placements.filter((p) => tree.nodes.has(p.topicId)).map((p) => ({ primary: p.isPrimary, root: tree.nodes.get(p.topicId)!.root, path: pathOf(tree, p.topicId) })),
     attachments: tombstoned
       ? []
@@ -790,5 +793,30 @@ export async function listChatDays(db: Db, ctx: AuthCtx, chatId: string, params:
     WHERE m.chat_id = ${chat.id}::uuid AND m.state = 'active' AND m.kind IN ('text', 'media') AND m.sent_at IS NOT NULL
     GROUP BY 1 ORDER BY 1`);
   return { tz, days: rows.rows };
+}
+
+/**
+ * The owner moves a message to small talk (off the map) or back onto the map. The choice is kept:
+ * automatic screening, re-checks and re-reads never override it. The map updates at once; a message
+ * that was never placed joins the map at the next Refresh.
+ */
+export async function setSmallTalk(db: Db, ctx: AuthCtx, messageId: string, body: unknown) {
+  if (ctx.mode !== 'private') throw new SafeError('not available in the public demo', 403, 'demo_forbidden');
+  const small = (body as { small?: unknown } | null)?.small;
+  if (typeof small !== 'boolean') throw new SafeError('say whether it is small talk', 400, 'invalid');
+  const [m] = await db
+    .select({ id: s.messages.id, chatId: s.messages.chatId })
+    .from(s.messages)
+    .where(and(eq(s.messages.id, messageId), eq(s.messages.workspaceId, ctx.workspaceId)));
+  if (!m) throw new SafeError('message not found', 404, 'not_found');
+  await requireChat(db, ctx, m.chatId);
+  return db.transaction(async (tx) => {
+    await tx.update(s.messages).set({ filler: small, fillerOverride: small }).where(eq(s.messages.id, m.id));
+    // The map and its counts change: a new graph version makes every view reload.
+    const [g] = await tx.update(s.chats).set({ graphVersion: sql`${s.chats.graphVersion} + 1` }).where(eq(s.chats.id, m.chatId)).returning({ v: s.chats.graphVersion });
+    await notifyChange(tx, { ws: ctx.workspaceId, kind: 'graph', chatId: m.chatId, version: g.v });
+    const placed = (await tx.select({ id: s.placements.messageId }).from(s.placements).where(eq(s.placements.messageId, m.id)).limit(1)).length > 0;
+    return { ok: true, small_talk: small, placed };
+  });
 }
 

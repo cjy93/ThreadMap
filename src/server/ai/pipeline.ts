@@ -381,7 +381,8 @@ async function runMicrobatch(deps: PipelineDeps, job: Job, chat: Chat): Promise<
       await tx
         .update(s.messages)
         .set({ filler: sql`(${s.messages.id} IN (${sql.join([...filler, NIL_ID].map((id) => sql`${id}::uuid`), sql`, `)}) OR ${courtesyOnlySql(sql`${s.messages}`)})` })
-        .where(inArray(s.messages.id, msgs.map((m) => m.id)));
+        // A message the owner moved keeps the owner's choice.
+        .where(and(inArray(s.messages.id, msgs.map((m) => m.id)), isNull(s.messages.fillerOverride)));
     }
   });
 
@@ -1040,11 +1041,11 @@ export async function screenFiller(deps: PipelineDeps, job: Job, chat: Chat): Pr
   if (chat.mapOf) return 0;
   const started = Date.now();
   // Small talk without asking: courtesy-only messages ("Done", "Thank you"), even when cited.
-  await db.execute(sql`UPDATE messages m SET filler = true WHERE m.chat_id = ${chat.id}::uuid AND m.filler IS NOT TRUE AND ${courtesyOnlySql()}`);
+  await db.execute(sql`UPDATE messages m SET filler = true WHERE m.chat_id = ${chat.id}::uuid AND m.filler IS NOT TRUE AND m.filler_override IS NULL AND ${courtesyOnlySql()}`);
   // Content without asking: long messages, links, files, and anything a summary cites.
   await db.execute(sql`
     UPDATE messages m SET filler = false
-    WHERE m.chat_id = ${chat.id}::uuid AND m.filler IS NOT FALSE AND NOT ${courtesyOnlySql()}
+    WHERE m.chat_id = ${chat.id}::uuid AND m.filler IS NOT FALSE AND m.filler_override IS NULL AND NOT ${courtesyOnlySql()}
       AND (m.id IN (${citedMessagesSql(sql`${chat.id}::uuid`)}) OR (m.filler IS NULL AND (m.kind <> 'text' OR length(COALESCE(m.body, '')) > ${FILLER_MAX_CHARS}
         OR EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id)
         OR EXISTS (SELECT 1 FROM resources r WHERE r.message_id = m.id))))`);
@@ -1076,7 +1077,7 @@ export async function screenFiller(deps: PipelineDeps, job: Job, chat: Chat): Pr
     await db
       .update(s.messages)
       .set({ filler: sql`${s.messages.id} IN (${sql.join([...flagged, NIL_ID].map((id) => sql`${id}::uuid`), sql`, `)})` })
-      .where(inArray(s.messages.id, [...refs.values()]));
+      .where(and(inArray(s.messages.id, [...refs.values()]), isNull(s.messages.fillerOverride)));
     n += refs.size;
   }
   if (n) await notifyChange(db, { ws: chat.workspaceId, kind: 'analysis', chatId: chat.id });

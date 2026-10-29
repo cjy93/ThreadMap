@@ -108,7 +108,11 @@ export function matchingMessagesSql(scope: { userId: string; workspaceId: string
   // Small talk leaves the map, except messages a Nemotron summary cites as its
   // source: what a summary says must be findable on the map.
   // Courtesy-only messages ("Done", "Thank you") stay off even when a summary cites them.
-  if (!f.includeFiller) parts.push(sql`((m.filler IS NOT TRUE OR m.id IN (${citedMessagesSql(chatList)})) AND NOT ${courtesyOnlySql()})`);
+  // A message the owner moved follows the owner's choice, whatever the rules above say.
+  if (!f.includeFiller)
+    parts.push(
+      sql`(CASE WHEN m.filler_override IS NOT NULL THEN NOT m.filler_override ELSE ((m.filler IS NOT TRUE OR m.id IN (${citedMessagesSql(chatList)})) AND NOT ${courtesyOnlySql()}) END)`,
+    );
   if (f.side) parts.push(f.side === 'mine' ? sql`m.direction = 'outgoing'` : sql`m.direction = 'incoming'`);
   if (f.status === 'missed') parts.push(sql`NOT COALESCE(${isReadSql()}, false)`);
   if (f.status === 'read') parts.push(sql`COALESCE(${isReadSql()}, false)`);

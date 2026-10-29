@@ -134,6 +134,13 @@
       "when": 1793400120000,
       "tag": "0018_rescreen_small_talk",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793400180000,
+      "tag": "0019_filler_override",
+      "breakpoints": true
     }
   ]
 }
