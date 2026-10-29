@@ -64,19 +64,6 @@ export function JourneyStep({
   );
 }
 
-/** The three steps at a glance under the title; each jumps to its step. */
-export function JourneyNav({ steps }: { steps: { n: number; label: string; state: 'done' | 'now' | 'later' }[] }) {
-  return (
-    <nav className="jnav" aria-label="Steps">
-      {steps.map((s) => (
-        <a key={s.n} href={`#step-${s.n}`} className={`jnav-${s.state}`} aria-current={s.state === 'now' ? 'step' : undefined}>
-          <span className="jnav-n">{s.state === 'done' ? '✓' : String(s.n).padStart(2, '0')}</span> {s.label}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
 /** A phone showing a code being scanned. */
 export function PhoneArt() {
   return (

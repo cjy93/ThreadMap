@@ -560,7 +560,9 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .jkicker { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.32em; font-size: 13px; color: var(--knowledge); }
 .leave-note { font-size: 13px; color: var(--muted); margin: 0 auto 8px; }
 .leave-note strong { color: var(--accent); }
-.fine-print { font-size: 13px; color: var(--muted); text-align: left; margin: 6px auto 0; max-width: 620px; }
+/* The data explanation, open by default as a calm card. */
+.fine-print { font-size: 13px; line-height: 1.65; color: var(--text-2); text-align: left; margin: 10px auto 0; max-width: 680px; padding: 10px 16px; border-radius: 14px; background: var(--panel); border: 1px solid var(--border); }
+.fine-print p { margin: 8px 0 2px; }
 .fine-print summary { cursor: pointer; text-align: center; color: var(--text-2); list-style: none; }
 .fine-print summary::before { content: '▸ '; }
 .fine-print[open] summary::before { content: '▾ '; }
@@ -645,11 +647,49 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
   .jart *, .jstep.in .jart * { animation: none !important; stroke-dashoffset: 0; }
   .jvisual .jart, .jstep-now .jdot { animation: none; }
 }
-/* The three steps at a glance, under the title. */
-.jnav { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
-.jnav a { display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-2); text-decoration: none; font-size: 13px; }
-.jnav-n { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; letter-spacing: 0.1em; color: var(--knowledge); }
-.jnav a.jnav-done .jnav-n { color: var(--read); }
-.jnav a.jnav-now { border-color: var(--knowledge); color: var(--text); box-shadow: 0 0 16px color-mix(in srgb, var(--knowledge) 35%, transparent); }
-.jnav a.jnav-later { opacity: 0.6; }
-.jnav a:hover { border-color: var(--border-strong); }
+
+/* ---------------------------------------------------------------------------
+ * Orbit scene (OrbitScene.tsx): the steps as planets around a glowing star, in a night
+ * sky that stays dark in both themes. Our own SVG and CSS.
+ * ------------------------------------------------------------------------- */
+.orbit-scene {
+  max-width: 980px; margin: 14px auto 4px; border-radius: 22px; overflow: hidden; border: 1px solid #96afff29;
+  background: radial-gradient(ellipse at 78% 18%, #17307a 0%, transparent 55%), radial-gradient(ellipse at 50% 62%, #3a1f3a 0%, transparent 50%), linear-gradient(160deg, #070d22, #0b1640 60%, #08102c);
+}
+.orbit-scene svg { display: block; width: 100%; height: auto; }
+.os-star { animation: os-twinkle 4.5s ease-in-out infinite; }
+@keyframes os-twinkle { 50% { opacity: 0.25; } }
+.os-const path { fill: none; stroke: #96afff66; stroke-width: 1; }
+.os-const circle { fill: #dfe6ff; }
+.os-const text, .os-sun-label, .os-label { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; letter-spacing: 0.3em; text-anchor: middle; }
+.os-const text { fill: #8c9ac8; font-size: 15px; text-anchor: start; }
+.os-orbits ellipse { fill: none; stroke: #96afff40; stroke-width: 1.2; stroke-dasharray: 2 7; }
+.os-sun-glow { transform-origin: 500px 250px; animation: os-breathe 6s ease-in-out infinite; }
+.os-sun-core { transform-origin: 500px 250px; animation: os-breathe 6s ease-in-out infinite reverse; }
+@keyframes os-breathe { 50% { transform: scale(1.06); } }
+.os-sun-label { fill: #ffd3a6; font-size: 12px; opacity: 0.8; }
+.os-planet { cursor: pointer; }
+.os-planet .os-trail { fill: none; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 60 14; animation: os-flow 3.2s linear infinite; }
+@keyframes os-flow { to { stroke-dashoffset: -74; } }
+.os-planet .os-body { filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.25)); transition: transform 0.3s ease; transform-box: fill-box; transform-origin: center; }
+.os-planet:hover .os-body, .os-planet:focus-visible .os-body { transform: scale(1.12); }
+.os-ring { fill: none; stroke: #dfe6ff; stroke-width: 1.4; opacity: 0.85; }
+.os-stripes line { stroke: #ffe3ee; stroke-width: 1.4; opacity: 0.8; }
+.os-label { font-size: 22px; }
+.os-blue .os-label { fill: #a9bdff; }
+.os-pink .os-label { fill: #ff9cc4; }
+.os-orange .os-label { fill: #ffb15c; }
+.os-later { opacity: 0.55; }
+.os-later .os-trail { animation: none; }
+.os-pulse { fill: none; stroke: #ffffff; stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: os-ping 2.2s ease-out infinite; }
+@keyframes os-ping { from { opacity: 0.8; transform: scale(1); } to { opacity: 0; transform: scale(1.9); } }
+
+/* About the maker (MadeBy.tsx). */
+.made-by { display: flex; align-items: center; gap: 14px; max-width: 520px; margin: 22px auto 0; padding: 12px 16px; border-radius: 16px; background: var(--panel); border: 1px solid var(--border); }
+.made-by-mark { flex: none; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; color: var(--accent-ink); background: linear-gradient(135deg, var(--accent), var(--italic)); }
+.made-by-name { font-family: var(--font-fraunces), Georgia, serif; font-size: 20px; }
+.made-by-link { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--knowledge); color: var(--text); text-decoration: none; font-size: 13px; }
+.made-by-link:hover { background: var(--accent-soft); }
+@media (prefers-reduced-motion: reduce) {
+  .os-star, .os-sun-glow, .os-sun-core, .os-planet .os-trail, .os-pulse { animation: none; }
+}

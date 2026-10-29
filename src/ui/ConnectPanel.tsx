@@ -1,7 +1,9 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Avatar } from './Avatar';
-import { ChecklistArt, JourneyNav, JourneyStep, MindMapArt, PhoneArt } from './ConnectJourney';
+import { ChecklistArt, JourneyStep, MindMapArt, PhoneArt } from './ConnectJourney';
+import { MadeBy } from './MadeBy';
+import { OrbitScene } from './OrbitScene';
 import { api, leaveAndDeleteAccount } from './client';
 
 interface Status {
@@ -244,7 +246,7 @@ export function ConnectPanel({
           <strong>Leaving deletes your data.</strong> With no ThreadMap page open for 30 minutes, ThreadMap unlinks itself and deletes your chats, maps and photos. Keep a
           tab open while you want it to keep capturing.
         </p>
-        <details className="fine-print">
+        <details className="fine-print" open>
           <summary>How ThreadMap handles your data</summary>
           <p>
             ThreadMap runs a linked-device session in its cloud deployment (NVIDIA Brev). Chats you open are stored in the deployment&apos;s database and their text is sent
@@ -256,14 +258,8 @@ export function ConnectPanel({
             Leaving works like <em>Disconnect and delete my data</em>: the device is logged out of WhatsApp and every stored message, map and file is deleted.
           </p>
         </details>
-        <JourneyNav
-          steps={[
-            { n: 1, label: 'Link', state: stateOf(1) },
-            { n: 2, label: 'Choose', state: stateOf(2) },
-            { n: 3, label: 'Map', state: stateOf(3) },
-          ]}
-        />
       </header>
+      <OrbitScene states={[stateOf(1), stateOf(2), stateOf(3)]} title="Three steps: link your phone, choose chats, and NVIDIA Nemotron maps them. Click a planet to jump to its step." />
 
       <ol className="journey">
         <JourneyStep n={1} kicker="Link" title={linked ? 'WhatsApp is linked' : 'Scan the QR code'} state={stateOf(1)} side="left" visual={qrVisual}>
@@ -449,6 +445,7 @@ export function ConnectPanel({
           </div>
         </details>
       ) : null}
+      <MadeBy />
       <p className="connect-foot">
         <button onClick={onClose}>Back to maps</button>
         {/* Home without signing out: signing out deletes this account's data. */}

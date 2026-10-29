@@ -5,6 +5,7 @@ import { getAuth } from '@/server/auth';
 import { RootIcon } from '@/ui/RootIcon';
 import { Start } from '@/ui/Start';
 import { ThemeToggle } from '@/ui/ThemeToggle';
+import { MadeBy } from '@/ui/MadeBy';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ h
         </span>
       </div>
       <Start pairingEnabled={cfg.WHATSAPP_PAIRING_ENABLED} demoEnabled={cfg.PUBLIC_DEMO_ENABLED} signedIn={Boolean(session)} />
+      <MadeBy />
     </main>
   );
 }
