@@ -558,14 +558,6 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .connect-hero h2 { font-size: clamp(28px, 4.4vw, 40px); margin: 4px 0 6px; }
 .connect-hero .lede { font-size: 16px; color: var(--text-2); margin: 0 0 8px; }
 .jkicker { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; text-transform: uppercase; letter-spacing: 0.32em; font-size: 13px; color: var(--knowledge); }
-.leave-note { font-size: 13px; color: var(--muted); margin: 0 auto 8px; }
-.leave-note strong { color: var(--accent); }
-/* The data explanation, open by default as a calm card. */
-.fine-print { font-size: 13px; line-height: 1.65; color: var(--text-2); text-align: left; margin: 10px auto 0; max-width: 680px; padding: 10px 16px; border-radius: 14px; background: var(--panel); border: 1px solid var(--border); }
-.fine-print p { margin: 8px 0 2px; }
-.fine-print summary { cursor: pointer; text-align: center; color: var(--text-2); list-style: none; }
-.fine-print summary::before { content: '▸ '; }
-.fine-print[open] summary::before { content: '▾ '; }
 
 .journey { list-style: none; margin: 12px 0 6px; padding: 0; position: relative; }
 /* The line: a soft glowing gradient that draws down the page. */
@@ -659,28 +651,30 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .orbit-scene svg { display: block; width: 100%; height: auto; }
 .os-star { animation: os-twinkle 4.5s ease-in-out infinite; }
 @keyframes os-twinkle { 50% { opacity: 0.25; } }
-.os-const path { fill: none; stroke: #96afff66; stroke-width: 1; }
-.os-const circle { fill: #dfe6ff; }
-.os-const text, .os-sun-label, .os-label { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; letter-spacing: 0.3em; text-anchor: middle; }
-.os-const text { fill: #8c9ac8; font-size: 15px; text-anchor: start; }
+.os-sun-label, .os-label { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; letter-spacing: 0.3em; text-anchor: middle; }
 .os-orbits ellipse { fill: none; stroke: #96afff40; stroke-width: 1.2; stroke-dasharray: 2 7; }
 .os-sun-glow { transform-origin: 500px 250px; animation: os-breathe 6s ease-in-out infinite; }
 .os-sun-core { transform-origin: 500px 250px; animation: os-breathe 6s ease-in-out infinite reverse; }
 @keyframes os-breathe { 50% { transform: scale(1.06); } }
-.os-sun-label { fill: #ffd3a6; font-size: 12px; opacity: 0.8; }
+.os-sun-label { fill: #3a1a10; font-size: 13px; font-weight: 700; letter-spacing: 0.2em; }
 .os-planet { cursor: pointer; }
-.os-planet .os-trail { fill: none; stroke-width: 3; stroke-linecap: round; stroke-dasharray: 60 14; animation: os-flow 3.2s linear infinite; }
-@keyframes os-flow { to { stroke-dashoffset: -74; } }
 .os-planet .os-body { filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.25)); transition: transform 0.3s ease; transform-box: fill-box; transform-origin: center; }
 .os-planet:hover .os-body, .os-planet:focus-visible .os-body { transform: scale(1.12); }
 .os-ring { fill: none; stroke: #dfe6ff; stroke-width: 1.4; opacity: 0.85; }
 .os-stripes line { stroke: #ffe3ee; stroke-width: 1.4; opacity: 0.8; }
-.os-label { font-size: 22px; }
+.os-label { font-size: 12.5px; letter-spacing: 0.18em; }
+.os-legend text { font-family: var(--font-antonio), 'Arial Narrow', sans-serif; font-size: 12px; letter-spacing: 0.22em; fill: #c9d2f0; }
+.os-orbits .os-orbit-guard { stroke: #ff9cc466; }
+.os-orbits .os-orbit-built { stroke: #4fd1c566; }
+.os-orbits .os-orbit-feature { stroke: #ffb15c55; }
+.os-shield { fill: none; stroke: #ff9cc4; stroke-width: 1.2; stroke-dasharray: 3 4; }
+.os-planet:focus { outline: none; }
+.os-planet:focus-visible .os-body, .os-on .os-body { transform: scale(1.14); }
+.os-teal .os-label { fill: #4fd1c5; }
+.os-green .os-label { fill: #a6e06b; }
 .os-blue .os-label { fill: #a9bdff; }
 .os-pink .os-label { fill: #ff9cc4; }
 .os-orange .os-label { fill: #ffb15c; }
-.os-later { opacity: 0.55; }
-.os-later .os-trail { animation: none; }
 .os-pulse { fill: none; stroke: #ffffff; stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: os-ping 2.2s ease-out infinite; }
 @keyframes os-ping { from { opacity: 0.8; transform: scale(1); } to { opacity: 0; transform: scale(1.9); } }
 
@@ -691,5 +685,16 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .made-by-link { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--knowledge); color: var(--text); text-decoration: none; font-size: 13px; }
 .made-by-link:hover { background: var(--accent-soft); }
 @media (prefers-reduced-motion: reduce) {
-  .os-star, .os-sun-glow, .os-sun-core, .os-planet .os-trail, .os-pulse { animation: none; }
+  .os-star, .os-sun-glow, .os-sun-core, .os-pulse { animation: none; }
 }
+.orbit { max-width: 980px; margin: 0 auto; }
+.orbit-card { max-width: 640px; margin: 10px auto 0; padding: 10px 18px; border-radius: 14px; background: var(--panel); border: 1px solid var(--border); border-left-width: 3px; animation: os-card 0.35s ease; text-align: left; }
+.orbit-card p { margin: 4px 0 2px; font-size: 15px; color: var(--text-2); }
+.orbit-card.card-hint { text-align: center; border-left-width: 1px; }
+.orbit-card.card-pink { border-left-color: var(--italic); }
+.orbit-card.card-blue { border-left-color: var(--knowledge); }
+.orbit-card.card-teal { border-left-color: var(--resources); }
+.orbit-card.card-green { border-left-color: #8fd14f; }
+.orbit-card.card-orange { border-left-color: var(--accent); }
+@keyframes os-card { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { .orbit-card { animation: none; } }

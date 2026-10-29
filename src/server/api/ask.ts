@@ -336,7 +336,12 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   // 1 = a typed word inside a longer word ("LiceClip"), 2 = by meaning (Nemotron's terms, topics).
   const asked = normalizeSearch(question).trim();
   const exactSql = asked.length > 1 ? sql`(m.search_text ~ ${`\\m${reEscape(asked)}\\M`})` : sql`false`;
-  const partialSql = fragments.length ? sql`(${sql.join(fragments.map((f) => sql`m.search_text LIKE ${likePattern(f)}`), sql` OR `)})` : sql`false`;
+  // Partial = a typed word of 4+ letters inside a longer word ("clip" in "liceclip"), never a
+  // whole word: else a question with "the" would put nearly every message in this group.
+  const inside = fragments.filter((f) => f.length >= 4);
+  const partialSql = inside.length
+    ? sql`(${sql.join(inside.map((f) => sql`m.search_text ~ ${`[[:alnum:]]${reEscape(f)}|${reEscape(f)}[[:alnum:]]`}`), sql` OR `)})`
+    : sql`false`;
   const tierSql = sql`(CASE WHEN ${exactSql} THEN 0 WHEN ${partialSql} THEN 1 ELSE 2 END)`;
   const termValues = terms.length ? sql.join(terms.map((t) => sql`(${t}, ${likePattern(t)}, ${isTyped(t) ? TYPED_TERM_WEIGHT : 1}::int)`), sql`, `) : sql`(NULL::text, NULL::text, 0)`;
   const topicArray = topicIds.length ? sql`ARRAY[${sql.join(topicIds.map((id) => sql`${id}::uuid`), sql`, `)}]` : sql`ARRAY[]::uuid[]`;

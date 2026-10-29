@@ -239,27 +239,12 @@ export function ConnectPanel({
   return (
     <div className="connect-page">
       <header className="connect-hero">
-        <div className="jkicker">Link · choose · map</div>
+        <div className="jkicker">How it works · guardrails · connect</div>
         <h2>Connect WhatsApp</h2>
-        <p className="lede">Scan once with your phone, open the chats you want, and NVIDIA Nemotron turns each one into a mind map.</p>
-        <p className="leave-note">
-          <strong>Leaving deletes your data.</strong> With no ThreadMap page open for 30 minutes, ThreadMap unlinks itself and deletes your chats, maps and photos. Keep a
-          tab open while you want it to keep capturing.
-        </p>
-        <details className="fine-print" open>
-          <summary>How ThreadMap handles your data</summary>
-          <p>
-            ThreadMap runs a linked-device session in its cloud deployment (NVIDIA Brev). Chats you open are stored in the deployment&apos;s database and their text is sent
-            to Nebius Token Factory (NVIDIA Nemotron) for analysis. This uses Baileys, an unofficial WhatsApp Web library — an experimental integration that WhatsApp could
-            restrict. Messages of chats you have not opened are held only briefly in memory (≤32 MiB, ≤5 min), then discarded; only their name, type, last-message time and
-            the small profile photo of chats you scroll past are kept so the list can show them. ThreadMap never sends messages or read receipts.
-          </p>
-          <p>
-            Leaving works like <em>Disconnect and delete my data</em>: the device is logged out of WhatsApp and every stored message, map and file is deleted.
-          </p>
-        </details>
+        <p className="lede">Scan once with your phone, open the chats you want, and NVIDIA Nemotron turns each one into a mind map. Click a planet to see where your data goes and what protects it.</p>
       </header>
-      <OrbitScene states={[stateOf(1), stateOf(2), stateOf(3)]} title="Three steps: link your phone, choose chats, and NVIDIA Nemotron maps them. Click a planet to jump to its step." />
+      {/* How it works and the guardrails at each stop: click a planet to read it. */}
+      <OrbitScene />
 
       <ol className="journey">
         <JourneyStep n={1} kicker="Link" title={linked ? 'WhatsApp is linked' : 'Scan the QR code'} state={stateOf(1)} side="left" visual={qrVisual}>
@@ -421,11 +406,6 @@ export function ConnectPanel({
             Opening a chat stores its messages, asks your phone for its recent history and lets NVIDIA Nemotron map it. The first build is the slowest; after that, Refresh only
             reads new messages.
           </p>
-          {openedCount ? (
-            <button className="primary" onClick={onClose}>
-              Go to my maps
-            </button>
-          ) : null}
         </JourneyStep>
       </ol>
 
