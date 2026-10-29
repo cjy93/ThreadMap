@@ -31,6 +31,33 @@ const StudyNode = memo(function StudyNode({ data }: NodeProps<Node<SData>>) {
 });
 const nodeTypes = { study: StudyNode };
 
+// A link's label read the other way, for links the tree draws against their direction
+// (e.g. "question answered by detail" drawn detail → question reads "answer to").
+const INVERSE: Record<string, string> = {
+  'answered by': 'answer to',
+  'answer to': 'answered by',
+  answers: 'answered by',
+  'part of': 'has part',
+  'has part': 'part of',
+  'example of': 'has example',
+  'has example': 'example of',
+  'is a': 'includes',
+  includes: 'is a',
+  uses: 'used by',
+  'used by': 'uses',
+  requires: 'required by',
+  'required by': 'requires',
+  'leads to': 'follows from',
+  'follows from': 'leads to',
+  causes: 'caused by',
+  'caused by': 'causes',
+};
+export function reverseLabel(label: string): string {
+  const l = label.trim();
+  if (!l) return '';
+  return INVERSE[l.toLowerCase()] ?? `← ${l}`;
+}
+
 /**
  * Tree from the core along the relations (whichever way they point); links that
  * would close a loop are drawn across. Concepts not linked to the core get a column of their own.
@@ -76,7 +103,10 @@ export function layoutStudyMap(map: StudyMap) {
   const tree = new Set([...parent.values()].filter(Boolean).map((p) => p!.rel));
   const edges: Edge[] = [];
   for (const [k, p] of parent) {
-    if (p) edges.push({ id: `t:${p.key}->${k}`, source: p.key, target: k, type: 'default', className: 'e-study', label: p.rel.label || undefined });
+    if (!p) continue;
+    // Drawn parent → child; if the relation points child → parent, read its label the other way.
+    const label = p.rel.from === p.key ? p.rel.label : reverseLabel(p.rel.label);
+    edges.push({ id: `t:${p.key}->${k}`, source: p.key, target: k, type: 'default', className: 'e-study', label: label || undefined });
   }
   map.relations.forEach((r, i) => {
     if (!tree.has(r) && pos.has(r.from) && pos.has(r.to)) edges.push({ id: `x:${i}`, source: r.from, target: r.to, type: 'default', className: 'e-cross', label: r.label || undefined });
