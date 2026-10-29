@@ -694,6 +694,7 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .orbit-card p { margin: 4px 0 2px; font-size: 15px; color: var(--text-2); }
 .orbit-card ul { margin: 6px 0 2px; padding-left: 18px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
 .orbit-card.card-hint { text-align: center; border-left-width: 1px; }
+.orbit-card:not(.card-hint) { cursor: zoom-out; user-select: none; }
 .orbit-card.card-pink { border-left-color: var(--italic); }
 .orbit-card.card-blue { border-left-color: var(--knowledge); }
 .orbit-card.card-teal { border-left-color: var(--resources); }

@@ -198,7 +198,13 @@ export function OrbitScene() {
           })}
         </svg>
       </div>
-      <div className={`orbit-card ${planet ? `card-${planet.kind}` : 'card-hint'}`} aria-live="polite">
+      {/* Double-click the card to tuck it away under the sky; a planet brings it back. */}
+      <div
+        className={`orbit-card ${planet ? `card-${planet.kind}` : 'card-hint'}`}
+        aria-live="polite"
+        title={planet ? 'Double-click to hide' : undefined}
+        onDoubleClick={() => setPicked(null)}
+      >
         {planet ? (
           <>
             <div className="jkicker">
@@ -215,7 +221,7 @@ export function OrbitScene() {
             )}
           </>
         ) : (
-          <p className="counts">Click a planet: pink are guardrails, teal and green what ThreadMap is built with (green: NVIDIA), orange and blue its features.</p>
+          <p className="counts">Click a planet to read about it (double-click its card to hide it): pink are guardrails, teal and green what ThreadMap is built with (green: NVIDIA), orange and blue its features.</p>
         )}
       </div>
     </section>
