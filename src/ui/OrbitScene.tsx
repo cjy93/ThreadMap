@@ -44,7 +44,20 @@ interface Planet {
 
 const PLANETS: Planet[] = [
   { key: 'leave', group: 'guard', deg: 200, label: 'LEAVING DELETES', kind: 'pink', r: 13, text: 'No ThreadMap tab open for 30 minutes: it unlinks your phone and deletes your chats, maps and photos. Keep a tab open to keep capturing.' },
-  { key: 'opened', group: 'guard', deg: 272, label: 'ONLY WHAT YOU OPEN', kind: 'pink', r: 12, text: 'Only chats you open are saved and analysed. WhatsApp sends every chat to a linked device; for chats you have not opened, ThreadMap holds them in memory only (at most 5 minutes, in case you open one), then drops them. They are never saved.' },
+  {
+    key: 'opened',
+    group: 'guard',
+    deg: 272,
+    label: 'ONLY WHAT YOU OPEN',
+    kind: 'pink',
+    r: 12,
+    text: [
+      'Only chats you open have their messages saved and read by Nemotron. Unopened chats keep just their name, type, last-message time and photo, so you can pick them.',
+      'At linking, WhatsApp sends recent history for every chat, once. For unopened chats ThreadMap holds it in memory for 5 minutes, then drops it, never saved.',
+      'Tip: open the chats you care about within 5 minutes of linking to keep that history.',
+      'Opening a chat later works too: new messages are saved from then on, and ThreadMap asks your phone for older ones. For more, keep WhatsApp open on your phone and click Load older messages (50 at a time; WhatsApp may send fewer).',
+    ],
+  },
   { key: 'readonly', group: 'guard', deg: 326, label: 'READ-ONLY', kind: 'pink', r: 12, text: 'ThreadMap never sends messages or read receipts.' },
   {
     key: 'encrypted',
@@ -70,8 +83,8 @@ const PLANETS: Planet[] = [
     text: 'ThreadMap relies on WhatsApp, Supabase and NVIDIA Nemotron. When one of them is down, slow or out of allowance, ThreadMap says which one instead of failing silently.',
   },
   { key: 'whatsapp', group: 'built', deg: 245, label: 'WHATSAPP LINK', kind: 'teal', r: 15, text: 'A linked device, like WhatsApp Web, via Baileys: an unofficial library, so WhatsApp could restrict it.' },
-  { key: 'supabase', group: 'built', deg: 335, label: 'SUPABASE', kind: 'teal', r: 15, text: 'PostgreSQL in Singapore holds your opened chats, maps and search.' },
-  { key: 'nemotron', group: 'built', deg: 65, label: 'NVIDIA NEMOTRON', kind: 'green', r: 18, text: 'Nemotron Nano, Super and Super VL on Nebius Token Factory read your messages to build the map. Spending is capped per person.' },
+  { key: 'supabase', group: 'built', deg: 335, label: 'SUPABASE', kind: 'teal', r: 15, text: ['PostgreSQL in Singapore holds the messages, maps and search of the chats you open.', 'For chats you have not opened it keeps only the chat list (name, type, last-message time), no messages.'] },
+  { key: 'nemotron', group: 'built', deg: 65, label: 'NVIDIA NEMOTRON', kind: 'green', r: 18, text: ['Nemotron Nano, Super and Super VL on Nebius Token Factory read the messages of chats you open to build the map. Unopened chats never reach Nemotron.', 'Spending is capped per person.'] },
   { key: 'brev', group: 'built', deg: 155, label: 'NVIDIA BREV', kind: 'green', r: 14, text: 'Runs ThreadMap in the cloud: web app, WhatsApp link and analysis worker in one container.' },
   { key: 'map', group: 'feature', deg: 215, label: 'MIND MAP', kind: 'orange', r: 20, text: 'Four roots with nested topics; every node opens its exact source messages and files.' },
   { key: 'ask', group: 'feature', deg: 305, label: 'ASK', kind: 'blue', r: 17, text: 'Exact words first, then partial words, then meaning — with an answer that cites its messages.' },
