@@ -854,16 +854,17 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
               <div className="bubble mine">{searchRes.query}</div>
               {!conceptMap ? (
                 <button
-                  className="msg"
+                  className="ask-action"
                   onClick={() => {
                     setConceptMap(true);
                     setHeadFolded(true);
                   }}
                 >
-                  Show concept map
+                  ◇ Show concept map →
                 </button>
               ) : null}
-              <div className="bubble">
+              <div className="bubble ai-read">
+                <div className="ask-label">{searchRes.interpretation ? 'Nemotron’s reading' : 'Search'}</div>
                 {searchRes.interpretation ?? searchRes.note ?? 'Searching for these words (the model was not available):'}
                 {searchRes.terms.length ? (
                   <div className="terms">
@@ -877,6 +878,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
               </div>
               {answer ? (
                 <div className="bubble answer" aria-live="polite">
+                  <div className="ask-label">Nemotron’s answer</div>
                   {answer.state === 'loading' ? (
                     <span className="counts">{answer.note ?? 'NVIDIA Nemotron is reading the chat’s discussion summaries and the matching messages to answer (up to a few minutes for a long chat)…'}</span>
                   ) : answer.state === 'none' ? (
@@ -907,13 +909,19 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                   )}
                 </div>
               ) : null}
+              {searchRes.topics.length ? <div className="ask-section">Topics · {searchRes.topics.length}</div> : null}
               {searchRes.topics.map((t) => (
-                <button key={t.topic_id} className="msg" onClick={() => onRevealPath(t.chat_id, t.topic_id)}>
+                <button key={t.topic_id} className="msg ask-topic" onClick={() => onRevealPath(t.chat_id, t.topic_id)}>
                   Topic: {t.path.map((p) => p.title).join(' › ')}
                 </button>
               ))}
+              {searchRes.results.length ? (
+                <div className="ask-section">
+                  From your chats · {searchRes.results.length} message{searchRes.results.length === 1 ? '' : 's'} · double-click to open
+                </div>
+              ) : null}
               {searchRes.results.map((r) => (
-                <div key={r.message_id} className="msg" {...openOnDoubleClick(() => onOpenMessage(r.chat_id, r.message_id))}>
+                <div key={r.message_id} className="msg ask-hit" {...openOnDoubleClick(() => onOpenMessage(r.chat_id, r.message_id))}>
                   {r.context?.before ? (
                     <div className="ask-ctx">
                       ↑ {r.context.before.rel} · <strong>{r.context.before.sender}</strong>: {r.context.before.text}
