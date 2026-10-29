@@ -207,7 +207,7 @@ const ANSWER_RULES = `- First work out what the question is really asking for (e
  * and the chats' discussion summaries, whose points (refs p1…) each come from
  * specific messages.
  */
-export function answerPrompt(question: string, messages: { ref: string; chat: string; sender: string; time: string | null; text: string; context?: string[] }[], discussions: AnswerDiscussion[], words: string[] = []) {
+export function answerPrompt(question: string, messages: { ref: string; chat: string; sender: string; time: string | null; text: string; exact?: boolean; context?: string[] }[], discussions: AnswerDiscussion[], words: string[] = []) {
   return {
     system: `You answer the owner's question about their own WhatsApp chats. ${GUARD}
 Return {"answer","points":[{"text","refs"}],"enough"}.
@@ -216,6 +216,7 @@ ${ANSWER_RULES}
 - points: one per item or finding (for a list, one per item, saying briefly what it is and how it came up), each with refs to the messages (m…) or summary points (p…) it comes from, one to three, best first; at most 16.
 - enough: false when the supplied content does not answer the question; then say in answer what is missing.
 - A message's context lists the messages around it (the one it replies to or the one before it; the reply to it or the one after it). Use it to tell what a short message or a bare name is about, and say so in the point; cite the matched message.
+- A message marked exact contains exactly what was asked. Cite every exact message, each in its own point and before the others, saying what it is or means from its context (e.g. a later message corrects it, or replies to it).
 - words_in_chats (when given): words in the chats that contain what was typed (e.g. typed "clip" -> "liceclip"). The person may be half-remembering a name: first give each such word found in the messages its own point (what it is, from its message and context), then the other findings.`,
     user: JSON.stringify({ question, messages, discussions, ...(words.length ? { words_in_chats: words } : {}) }),
   };

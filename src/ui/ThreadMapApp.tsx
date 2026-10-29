@@ -1056,6 +1056,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                     </div>
                   ) : null}
                   <strong>{r.sender}</strong> <span className={r.review === 'missed' ? 'missed' : 'readbadge'}>{r.review}</span>
+                  {r.exact ? <span className="exact-badge">exact match</span> : null}
                   <div>{r.snippet}</div>
                   {r.context?.after ? (
                     <div className="ask-ctx">

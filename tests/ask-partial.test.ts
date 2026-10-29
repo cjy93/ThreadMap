@@ -1,8 +1,9 @@
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as s from '../src/db/schema';
-import { loadFixtureWorkspace } from '../src/fixtures/load';
-import { ask } from '../src/server/api/ask';
+import { answerQuestion, ask } from '../src/server/api/ask';
+import { fixtureLlmConfig, loadFixtureWorkspace } from '../src/fixtures/load';
+import type { CompletionRequest, ModelProvider } from '../src/server/ai/provider';
 import { answerPrompt } from '../src/server/ai/prompts';
 import type { AuthCtx } from '../src/server/api/service';
 import { ensurePrivateWorkspace } from '../src/server/workspace';
@@ -81,6 +82,28 @@ describe('Ask: part of a word, ranked by what was typed, with context', () => {
     const p = answerPrompt('clip', [], [], ['liceclip']);
     expect(JSON.parse(p.user).words_in_chats).toEqual(['liceclip']);
     expect(p.system).toContain('half-remembering');
+  });
+
+  it('lists a message containing exactly what was asked first, marked exact', async () => {
+    const r = await ask(t.db, auth, params('LiceClip'), async () => ({ interpretation: 'LiceClip', terms: ['liceclip', 'hackathon', 'demo', 'project', 'showcase', 'judges'], topicIds: [] }));
+    expect(r.results[0]).toMatchObject({ message_id: ids.tool, exact: true });
+    expect(r.results.slice(1).every((x) => !x.exact)).toBe(true);
+  });
+
+  it('tells the answer which messages contain exactly what was asked, so it cites them', async () => {
+    let seen: { messages: { text: string; exact?: boolean }[] } = { messages: [] };
+    const provider: ModelProvider = {
+      kind: 'nebius',
+      modelIdFor: () => 'stub-balanced',
+      complete: async (req: CompletionRequest) => {
+        if (req.operation === 'ask_answer' || JSON.parse(req.user).messages) seen = JSON.parse(req.user);
+        return { text: JSON.stringify({ answer: 'x', enough: true, points: [] }), modelId: 'stub-balanced', fallback: false, usage: { input: 10, output: 5, reasoning: null } };
+      },
+    };
+    await answerQuestion({ db: t.db, provider, cfg: fixtureLlmConfig() }, auth.workspaceId, [chatId], 'LiceClip', [ids.tool, ids.noise2]);
+    expect(seen.messages.find((m) => m.text === 'LiceClip')?.exact).toBe(true);
+    expect(seen.messages.find((m) => m.text !== 'LiceClip')?.exact).toBeUndefined();
+    expect(answerPrompt('x', [], []).system).toContain('marked exact');
   });
 
   it('gives each result the message around it, so a bare name says what it was about', async () => {

@@ -324,12 +324,15 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   // Typed weight for a typed word and for any term containing one ("liceclip" for "clip").
   const typed = new Set(normalizeSearch(question).split(/\s+/));
   const isTyped = (t: string) => typed.has(t) || fragments.some((f) => t.includes(f));
+  // A message containing exactly what was asked comes first, whatever else matches more terms.
+  const asked = normalizeSearch(question).trim();
+  const exactSql = asked.length > 1 ? sql`(m.search_text LIKE ${likePattern(asked)})` : sql`false`;
   const termValues = terms.length ? sql.join(terms.map((t) => sql`(${t}, ${likePattern(t)}, ${isTyped(t) ? TYPED_TERM_WEIGHT : 1}::int)`), sql`, `) : sql`(NULL::text, NULL::text, 0)`;
   const topicArray = topicIds.length ? sql`ARRAY[${sql.join(topicIds.map((id) => sql`${id}::uuid`), sql`, `)}]` : sql`ARRAY[]::uuid[]`;
   // Rare terms count more: someone searching usually wants a name or a term, not a common word.
   // A term's weight is scaled from 1x (in every message searched) up to 2x (in just one), by how
   // many of the searched messages it matches; a typed word still outweighs Nemotron's additions.
-  const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; sent_at: Date | null; is_read: boolean; content_revision: number; score: number; total: number }>(sql`
+  const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; sent_at: Date | null; is_read: boolean; content_revision: number; score: number; exact: boolean; total: number }>(sql`
     WITH mt AS (${matching}), terms(t, p, w) AS (VALUES ${termValues}),
     n AS (SELECT greatest(count(*), 2)::float AS n FROM mt),
     ts AS (
@@ -341,10 +344,10 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
         (SELECT coalesce(sum(ts.w * (1 + ln(n.n / least(ts.df, n.n)) / ln(n.n))), 0) FROM ts, n WHERE ${termMatchSql(sql`ts.t`, sql`ts.p`)})
         + CASE WHEN EXISTS (SELECT 1 FROM placements pl WHERE pl.message_id = m.id AND pl.topic_id = ANY(${topicArray})) THEN 2 ELSE 0 END AS score
       FROM messages m JOIN mt ON mt.id = m.id)
-    SELECT m.id, m.chat_id, m.sender_label, m.body, m.sent_at, mt.is_read, m.content_revision, scored.score::float AS score, count(*) OVER ()::int AS total
+    SELECT m.id, m.chat_id, m.sender_label, m.body, m.sent_at, mt.is_read, m.content_revision, scored.score::float AS score, ${exactSql} AS exact, count(*) OVER ()::int AS total
     FROM scored JOIN messages m ON m.id = scored.id JOIN mt ON mt.id = m.id
     WHERE scored.score > 0
-    ORDER BY scored.score DESC, m.sent_at DESC NULLS LAST, m.id DESC LIMIT ${ASK_PAGE_SIZE} OFFSET ${offset}`);
+    ORDER BY ${exactSql} DESC, scored.score DESC, m.sent_at DESC NULLS LAST, m.id DESC LIMIT ${ASK_PAGE_SIZE} OFFSET ${offset}`);
   const total = rows.rows[0]?.total ?? (offset ? offset : 0);
   const nextOffset = offset + rows.rows.length < total ? offset + rows.rows.length : null;
 
@@ -378,6 +381,7 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
         review: r.is_read ? 'read' : 'missed',
         content_revision: r.content_revision,
         score: r.score,
+        exact: r.exact,
         topic_paths: placementRows.filter((p) => p.messageId === r.id && trees.get(r.chat_id)?.nodes.has(p.topicId)).map((p) => pathOf(trees.get(r.chat_id)!, p.topicId)),
         route: `/chats/${r.chat_id}/messages/${r.id}`,
         context: context.get(r.id) ?? {},
@@ -433,6 +437,7 @@ export async function answerQuestion(
   const descOf = new Map(seen.filter((a) => a.desc).map((a) => [a.messageId, a.desc!]));
   // The messages around each match, so a short reply or a bare name can be understood.
   const around = await messageContext(db, rows.map((r) => r.id));
+  const asked = normalizeSearch(question).trim();
   const units = await db
     .select({ chatId: s.analysisUnits.chatId, meta: s.analysisUnits.summaryBullets, terms: s.analysisUnits.topicTerms, refs: s.analysisUnits.messageRefs })
     .from(s.analysisUnits)
@@ -450,7 +455,9 @@ export async function answerQuestion(
     const text = [r.body ?? '', descOf.get(r.id) ? `[image: ${descOf.get(r.id)}]` : ''].filter(Boolean).join(' ').slice(0, 400);
     const ctx = around.get(r.id);
     const context = [ctx?.before, ctx?.after].filter((c): c is ContextLine => !!c).map((c) => `(${c.rel}) ${c.sender}: ${c.text.slice(0, 160)}`);
-    const m = { ref: `m${messages.length + 1}`, chat: titleOf.get(r.chatId)!, sender: r.sender, time: r.sentAt ? r.sentAt.toISOString().slice(0, 16) : null, text, ...(context.length ? { context } : {}) };
+    // Contains exactly what was asked: the answer must cite it (see answerPrompt).
+    const exact = asked.length > 1 && normalizeSearch(text).includes(asked);
+    const m = { ref: `m${messages.length + 1}`, chat: titleOf.get(r.chatId)!, sender: r.sender, time: r.sentAt ? r.sentAt.toISOString().slice(0, 16) : null, text, ...(exact ? { exact: true } : {}), ...(context.length ? { context } : {}) };
     // The matches take at most half of the first part; the summaries need the rest.
     if (used + cost(m) > base + limit / 2) break;
     used += cost(m);

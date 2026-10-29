@@ -47,6 +47,8 @@ export interface AskResult {
     snippet: string;
     review: string;
     topic_paths: PathItem[][];
+    /** Contains exactly what was asked (listed first). */
+    exact?: boolean;
     /** The messages around it: the one it replies to (or the one before), the reply (or the one after). */
     context?: { before?: AskContextLine; after?: AskContextLine };
   }[];
