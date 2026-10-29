@@ -142,6 +142,14 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
   const [conceptMap, setConceptMap] = useState(false);
   // The message whose concept map (study guide) fills the canvas, until "Back to mind map".
   const [studyFor, setStudyFor] = useState<string | null>(null);
+  // On a concept map the Source panel starts hidden, so the concept card takes its place;
+  // "Show source message" (or ✕ to hide again) toggles it while that map is open.
+  const [sourceHidden, setSourceHidden] = useState(true);
+  const openStudy = (id: string) => {
+    setStudyFor(id);
+    setSourceHidden(true);
+  };
+  const studySourceShown = Boolean(studyFor) && !sourceHidden;
   const gen = useRef(0);
   const router = useRouter();
 
@@ -272,6 +280,8 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
     // From another message: remember it for Back. From a list: start a new trail.
     setMsgTrail((t) => (messageId && messageId !== id ? [...t, messageId] : messageId ? t : []));
     setMessageId(id);
+    // Opening a message (e.g. a concept's source) shows the Source panel, also on a concept map.
+    setSourceHidden(false);
     setSuppressed((s) => {
       if (!s.has(id)) return s;
       const n = new Set(s);
@@ -724,7 +734,17 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
           </div>
         ) : null}
         {studyFor ? (
-          <StudyMapView key={studyFor} messageId={studyFor} onBack={() => setStudyFor(null)} onOpenMessage={onOpenMessage} />
+          <StudyMapView
+            key={studyFor}
+            messageId={studyFor}
+            onBack={() => setStudyFor(null)}
+            onOpenMessage={onOpenMessage}
+            sourceShown={studySourceShown}
+            onToggleSource={() => {
+              if (sourceHidden && !messageId) setMessageId(studyFor);
+              setSourceHidden(!sourceHidden);
+            }}
+          />
         ) : searchRes && conceptMap ? (
           <AskMap
             res={searchRes}
@@ -744,7 +764,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
         ) : null}
       </main>
 
-      {searchRes || selectedNode || messageId || starred ? (
+      {(searchRes || selectedNode || messageId || starred) && !(studyFor && sourceHidden) ? (
         <aside className="drawer" aria-label="Details">
           {/* Stays at the top while the details below scroll. */}
           <div className="drawer-bar">
@@ -769,6 +789,11 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
               <button
                 aria-label="Close details"
                 onClick={() => {
+                  // On a concept map, only hide the panel: "Show source message" brings it back.
+                  if (studyFor) {
+                    setSourceHidden(true);
+                    return;
+                  }
                   setMessageId(null);
                   setMsgTrail([]);
                   setSelectedNode(null);
@@ -795,7 +820,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                   void loadChats();
                 }}
                 onOpenMessage={onOpenMessage}
-                onConceptMap={setStudyFor}
+                onConceptMap={openStudy}
               />
             </div>
           ) : starred ? (

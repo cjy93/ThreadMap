@@ -236,7 +236,20 @@ const STEPS: { state: string; label: string }[] = [
   { state: 'building', label: 'Linking the concepts and writing the study guide' },
 ];
 
-export function StudyMapView({ messageId, onBack, onOpenMessage }: { messageId: string; onBack: () => void; onOpenMessage: (chatId: string, id: string) => void }) {
+export function StudyMapView({
+  messageId,
+  onBack,
+  onOpenMessage,
+  sourceShown,
+  onToggleSource,
+}: {
+  messageId: string;
+  onBack: () => void;
+  onOpenMessage: (chatId: string, id: string) => void;
+  /** Whether the Source panel (the message this map is about) is showing beside the map. */
+  sourceShown: boolean;
+  onToggleSource: () => void;
+}) {
   const [data, setData] = useState<StudyMapState | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState<'map' | 'guide'>('map');
@@ -312,6 +325,9 @@ export function StudyMapView({ messageId, onBack, onOpenMessage }: { messageId: 
       <ReactFlowProvider>{body}</ReactFlowProvider>
       <div className="study-bar">
         <button onClick={onBack}>← Back to mind map</button>
+        <button aria-pressed={sourceShown} onClick={onToggleSource} title="Show or hide the message this concept map is about, in the right-hand panel">
+          {sourceShown ? 'Hide source message' : 'Show source message'}
+        </button>
         {data?.state === 'done' ? (
           <>
             <span className="seg" role="group" aria-label="Show">
