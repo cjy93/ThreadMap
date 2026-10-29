@@ -54,6 +54,23 @@ describe('encrypted auth store and lease', () => {
     await lease!.release();
   });
 
+  it('saves a linking-sized batch of pre-keys in a few statements, each sealed to its own id', async () => {
+    const lease = await acquireLease(t.db, t.url, accountId, 'owner-a');
+    const a = await loadPgAuthState(t.db, accountId, KEY, 1, lease!.fence);
+    const many: Record<string, { public: Uint8Array; private: Uint8Array }> = {};
+    for (let i = 1; i <= 812; i++) many[`b${i}`] = { public: new Uint8Array([i % 256]), private: new Uint8Array([(i * 7) % 256]) };
+    await a.state.keys.set({ 'pre-key': many });
+    // A later set updates one, deletes one and adds one.
+    await a.state.keys.set({ 'pre-key': { b1: { public: new Uint8Array([0]), private: new Uint8Array([42]) }, b2: null, b813: { public: new Uint8Array([1]), private: new Uint8Array([2]) } } });
+    const got = await a.state.keys.get('pre-key', ['b1', 'b2', 'b500', 'b812', 'b813']);
+    expect(Buffer.from(got.b1.private)).toEqual(Buffer.from([42]));
+    expect(got.b2).toBeUndefined();
+    expect(Buffer.from(got.b500.private)).toEqual(Buffer.from([(500 * 7) % 256]));
+    expect(Buffer.from(got.b812.private)).toEqual(Buffer.from([(812 * 7) % 256]));
+    expect(got.b813).toBeDefined();
+    await lease!.release();
+  });
+
   it('allows only one companion to hold an account and fences writes after loss', async () => {
     const first = await acquireLease(t.db, t.url, accountId, 'owner-a');
     expect(first).not.toBeNull();
