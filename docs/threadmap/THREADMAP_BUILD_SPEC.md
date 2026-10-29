@@ -280,7 +280,7 @@ Set markOnlineOnConnect=false. Do not invoke readMessages, chat mark-read, sendM
 
 Discover minimal chat identity/title/type metadata for the chooser; display-name equality never merges chats. The session can receive broader data than the selection. Apply the selected-chat allowlist before durable source storage, model calls, media fetch, and content logging.
 
-Initial history may arrive before selection. The approved P0 policy is a **cloud memory-only preselection buffer**, bounded to 32 MiB and five minutes, disclosed in the connection explanation. Do not write its content to persistent storage, logs, traces, or another service. Release selected eligible records through normal ingestion and promptly discard the remainder. On expiry/overflow, discard buffered content, record a content-free coverage warning, and attempt bounded available-history retrieval only after selection. Clearing this buffer does not imply the library/OS never transiently handled account data.
+Initial history may arrive before selection. The approved P0 policy is a **cloud memory-only preselection buffer**, bounded to 32 MiB and thirty minutes (owner-approved change from five, 29 Oct 2026; equal to auto-delete), disclosed in the connection explanation. Do not write its content to persistent storage, logs, traces, or another service. Release selected eligible records through normal ingestion and promptly discard the remainder. On expiry/overflow, discard buffered content, record a content-free coverage warning, and attempt bounded available-history retrieval only after selection. Clearing this buffer does not imply the library/OS never transiently handled account data.
 
 For each selected chat, persist one of:
 

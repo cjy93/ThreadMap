@@ -11,8 +11,10 @@ interface Status {
   pairing_allowed: boolean;
   /** Most older messages ThreadMap imports per chat (WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT). */
   history_max?: number;
+  /** How long after a QR scan unopened chats can still be opened with their history. */
+  history_window_minutes?: number;
   desired_state?: string;
-  connection: { state: string; detail: string | null; last_event_at?: string | null; heartbeat_at?: string | null; uncertain_intervals?: { from: string; to: string }[]; relink_required?: boolean; remote_unlink_confirmed?: boolean | null };
+  connection: { state: string; detail: string | null; history_window_until?: string | null; last_event_at?: string | null; heartbeat_at?: string | null; uncertain_intervals?: { from: string; to: string }[]; relink_required?: boolean; remote_unlink_confirmed?: boolean | null };
   companion_heartbeat_at?: string | null;
   history?: { chat_id: string; title: string; history_state: string; earliest_at: string | null; latest_at: string | null; history_count: number; live_count: number }[];
   analysis?: { pending: number; budget_paused: number; failed: number; undispatched: number };
@@ -65,6 +67,12 @@ export function ConnectPanel({
 }) {
   const [st, setSt] = useState<Status | null>(null);
   const [chats, setChats] = useState<Discovered[]>([]);
+  // A clock for the chat-opening window's countdown (and the moment it closes).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10_000);
+    return () => clearInterval(t);
+  }, []);
   // The chat whose first open is being set up (storage, history, analysis).
   const [opening, setOpening] = useState<string | null>(null);
   // Opening a chat first asks how many of its newest older messages to import.
@@ -216,8 +224,16 @@ export function ConnectPanel({
   const q = search.trim().toLowerCase();
   const qDigits = q.replace(/\D/g, '');
   const matches = (ch: Discovered) => !q || ch.title.toLowerCase().includes(q) || (qDigits.length >= 3 && Boolean(ch.phone?.includes(qDigits)));
-  const shown = chats.filter((ch) => (kind === 'all' || ch.kind === kind) && matches(ch));
-  const counts = { all: chats.length, group: chats.filter((ch) => ch.kind === 'group').length, direct: chats.filter((ch) => ch.kind === 'direct').length };
+  // WhatsApp sends each chat's history once, at linking, and unopened chats' copy is held in
+  // memory only for the window after a scan. After it a newly opened chat would start empty,
+  // so only opened chats are listed and adding more means scanning again.
+  const windowMin = st.history_window_minutes ?? 30;
+  const windowLeftMs = c.history_window_until ? Date.parse(c.history_window_until) - now : 0;
+  const windowOpen = windowLeftMs > 0;
+  const pickable = windowOpen ? chats : chats.filter((ch) => ch.selected);
+  const hiddenCount = chats.length - pickable.length;
+  const shown = pickable.filter((ch) => (kind === 'all' || ch.kind === kind) && matches(ch));
+  const counts = { all: pickable.length, group: pickable.filter((ch) => ch.kind === 'group').length, direct: pickable.filter((ch) => ch.kind === 'direct').length };
   const openedCount = chats.filter((ch) => ch.selected).length;
   // Where the owner is: link the phone, then choose chats, then their maps grow.
   const step = !linked ? 1 : openedCount ? 3 : 2;
@@ -427,7 +443,7 @@ export function ConnectPanel({
                     {!shown.length ? (
                       <tr>
                         <td colSpan={4} className="counts">
-                          {q ? `No chats match “${search}”.` : 'No chats of this type yet.'}
+                          {q ? `No chats match “${search}”.` : windowOpen ? 'No chats of this type yet.' : 'No opened chats of this type.'}
                         </td>
                       </tr>
                     ) : null}
@@ -442,8 +458,33 @@ export function ConnectPanel({
               ? linked
                 ? 'Waiting for WhatsApp to send your chat list… this can take a minute after linking.'
                 : 'Your WhatsApp chats appear here after you scan the code.'
-              : `Open the chats you want mapped: ${openedCount} of ${chats.length} opened. Chats you never open are not stored or analysed.`}
+              : windowOpen
+                ? `Open the chats you want mapped: ${openedCount} of ${chats.length} opened. Chats you never open are not stored or analysed.`
+                : `Your opened chats: ${openedCount}. Chats you never open are not stored or analysed.`}
           </p>
+          {chats.length > 0 && linked && windowOpen ? (
+            <p className="window-note" role="note">
+              ⏱ Open more chats within the next <strong>{Math.max(1, Math.ceil(windowLeftMs / 60_000))} min</strong> (until{' '}
+              {new Date(Date.parse(c.history_window_until!)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}). WhatsApp sends each chat&apos;s history only
+              once, when you link; after {windowMin} minutes the unopened chats&apos; copy is dropped and this list shows only the chats you opened.
+            </p>
+          ) : null}
+          {chats.length > 0 && linked && !windowOpen ? (
+            <div className="window-note closed" role="note">
+              <p>
+                <strong>The {windowMin}-minute window for opening chats has ended</strong>, so only the chats you opened are listed
+                {hiddenCount ? ` (${hiddenCount} others hidden)` : ''}. WhatsApp sends a chat&apos;s history only once, when you link, and a chat opened now would start
+                empty.
+              </p>
+              <p>
+                <strong>Want to add more people or groups?</strong> Click <em>Disconnect &amp; delete my data</em>, then scan the QR code again and open them within{' '}
+                {windowMin} minutes. This deletes your current chats and maps first, so open those again too.
+              </p>
+              <button className="danger" onClick={() => void leaveAndDeleteAccount()}>
+                Disconnect &amp; delete my data
+              </button>
+            </div>
+          ) : null}
         </JourneyStep>
 
         <JourneyStep n={3} kicker="Map" title="Watch the map grow" state={stateOf(3)} side="left" visual={<MindMapArt />}>

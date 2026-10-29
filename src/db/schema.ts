@@ -214,6 +214,10 @@ export const connectionStatus = pgTable('connection_status', {
   lastEventAt: ts('last_event_at'),
   heartbeatAt: ts('heartbeat_at'),
   connectedSince: ts('connected_since'),
+  // Until when unopened chats' linking history is still held in memory (a fresh scan
+  // + WHATSAPP_PRESELECTION_BUFFER_TTL_SECONDS). Null: nothing held, so a chat opened
+  // now would start empty and the picker shows only opened chats.
+  historyWindowUntil: ts('history_window_until'),
   // Content-free gap records: [{from, to, reason}]
   uncertainIntervals: jsonb('uncertain_intervals').notNull().default([]),
   remoteUnlinkConfirmed: boolean('remote_unlink_confirmed'),

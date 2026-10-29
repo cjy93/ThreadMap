@@ -106,6 +106,9 @@ describe('owner controls and demo restrictions', () => {
     const st = await connectionStatus(t.db, ctx);
     expect(st.connection.state).toBe('disconnected');
     expect(st.analysis).toBeDefined();
+    // No scan yet: no window for opening chats with their linking history; it lasts 30 minutes.
+    expect(st.connection).toMatchObject({ history_window_until: null });
+    expect(st).toMatchObject({ history_window_minutes: 30 });
   });
 });
 

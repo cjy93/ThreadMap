@@ -13,8 +13,12 @@ export function ManualContent() {
           </li>
           <li>The WhatsApp account you link is your ThreadMap account — there is no email or password. Every new link starts fresh.</li>
           <li>
-            Pick chats in the list (tabs All / Groups / People, or search by name or number) and click <strong>Open</strong>. Open the chats you want within a few minutes of
-            linking: that is when your phone sends their recent history.
+            Pick chats in the list (tabs All / Groups / People, or search by name or number) and click <strong>Open</strong>. Open the chats you want within <strong>30 minutes</strong> of
+            linking: your phone sends their recent history once, when you link, and ThreadMap holds it in memory only for that long.
+          </li>
+          <li>
+            After 30 minutes the list shows only the chats you opened. To add more people or groups, click <strong>Disconnect &amp; delete my data</strong>, scan the QR code
+            again and open them within 30 minutes (this deletes your current chats and maps first).
           </li>
           <li>Chats you never open are not stored — only their name, type, last-message time and photo.</li>
         </ol>

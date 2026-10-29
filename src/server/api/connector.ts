@@ -94,6 +94,7 @@ export async function connectionStatus(db: Db, ctx: AuthCtx) {
     mode: 'private',
     pairing_allowed: loadAppConfig().WHATSAPP_PAIRING_ENABLED,
     history_max: loadWhatsAppConfig().WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT,
+    history_window_minutes: Math.round(loadWhatsAppConfig().WHATSAPP_PRESELECTION_BUFFER_TTL_SECONDS / 60),
     desired_state: la.desiredState,
     connection: {
       state: st?.state ?? 'disconnected',
@@ -101,6 +102,8 @@ export async function connectionStatus(db: Db, ctx: AuthCtx) {
       last_event_at: st?.lastEventAt?.toISOString() ?? null,
       heartbeat_at: st?.heartbeatAt?.toISOString() ?? null,
       connected_since: st?.connectedSince?.toISOString() ?? null,
+      // Unopened chats can still be opened with their linking history until then (null: no longer).
+      history_window_until: st?.historyWindowUntil?.toISOString() ?? null,
       uncertain_intervals: st?.uncertainIntervals ?? [],
       relink_required: st?.state === 'relink_required',
       remote_unlink_confirmed: st?.remoteUnlinkConfirmed ?? null,
@@ -229,8 +232,8 @@ export async function putSelections(db: Db, ctx: AuthCtx, body: unknown) {
   const res = await applySelections(db, ctx.workspaceId, parsed);
   // Let the companion release buffered pre-selection history for newly selected chats.
   await enqueueCommand(db, ctx, 'request_history', { reason: 'selection_changed' });
-  // WhatsApp sent each chat's history once, at linking; a chat opened later kept only a few
-  // minutes of it. Page the older history back in from the phone (all-history chats only).
+  // WhatsApp sent each chat's history once, at linking; a chat opened later kept only 30
+  // minutes (WHATSAPP_PRESELECTION_BUFFER_TTL_SECONDS) of it. Page older history back in from the phone (all-history chats only).
   const backfill = res.filter((r) => opening.includes(r.chatId) && r.historyMode === 'available_history');
   for (const r of backfill) await enqueueCommand(db, ctx, 'request_history', { chatId: r.chatId, backfill: true });
   return { effective: res };

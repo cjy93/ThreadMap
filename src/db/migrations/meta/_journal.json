@@ -120,6 +120,13 @@
       "when": 1793400000000,
       "tag": "0016_chat_history_limit",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793400060000,
+      "tag": "0017_history_window",
+      "breakpoints": true
     }
   ]
 }

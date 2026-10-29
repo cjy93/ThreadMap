@@ -283,6 +283,17 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 /* Ask: a chat-style search box and its reply. */
 .askbox { display: flex; gap: 6px; flex: 1; min-width: 260px; }
 .askbox input { flex: 1; min-width: 0; }
+.datebox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.datebox label { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+.datebox { position: relative; }
+.date-alert { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: min(440px, 90vw); display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.4; background: var(--surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+.date-alert.error { border: 1px solid #f87171; }
+.date-alert.warn { border: 1px solid #fbbf24; }
+.date-alert strong { grid-column: 1; }
+.date-alert.error strong { color: #f87171; }
+.date-alert.warn strong { color: #fbbf24; }
+.date-alert span { grid-column: 1; }
+.date-alert button { grid-column: 2; grid-row: 1 / span 2; align-self: start; padding: 2px 8px; }
 .bubble { padding: 8px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 8px; max-width: 92%; font-size: 14px; }
 .bubble.mine { margin-left: auto; background: var(--accent-soft); }
 .bubble .terms { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
@@ -711,3 +722,7 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .open-limit { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; font-size: 13px; }
 .open-limit label { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .open-limit input { width: 96px; margin: 0; flex: none; }
+/* Choose your chats: the window for opening chats after a scan. */
+.window-note { font-size: 14px; line-height: 1.55; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); margin: 10px 0; }
+.window-note.closed { border-color: #fbbf24; }
+.window-note.closed p { margin: 0 0 8px; }

@@ -15,6 +15,8 @@ import { ThemeToggle } from './ThemeToggle';
 import type { ChatSummary, MapNode, MapResponse } from './types';
 
 const TZ = 'Asia/Singapore';
+/** "2026-10-09" → "9 Oct 2026" (already a local calendar day). */
+const fmtDay = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 const DWELL_MS = 2000;
 
 type SearchResult = AskResult;
@@ -71,6 +73,12 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
     tz: TZ,
     topics: [],
   });
+  // Dates being picked; the map filters only when they are applied.
+  const [dates, setDates] = useState<{ from?: string; to?: string }>({});
+  useEffect(() => setDates({ from: filter.from, to: filter.to }), [filter.from, filter.to]);
+  const datesChanged = (dates.from ?? '') !== (filter.from ?? '') || (dates.to ?? '') !== (filter.to ?? '');
+  const [dateAlert, setDateAlert] = useState<{ level: 'error' | 'warn'; text: string } | null>(null);
+  useEffect(() => setDateAlert(null), [chatId]);
   const [map, setMap] = useState<MapResponse | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [view, setView] = useState<'map' | 'outline'>('map');
@@ -343,6 +351,7 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
   const runSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) {
+      document.getElementById('q')?.focus();
       setAnswer(null);
       return setSearchRes(null);
     }
@@ -710,16 +719,67 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
             Ask about this chat
           </label>
           <input id="q" type="search" placeholder="Ask: e.g. where did we decide the venue? photos of the poster" value={query} onChange={(e) => setQuery(e.target.value)} />
-          <button className="primary" disabled={!query.trim()} title={asking !== null ? 'Ask again: a new question replaces the one still running' : undefined}>
+          <button className="primary" title={asking !== null ? 'Ask again: a new question replaces the one still running' : undefined}>
             {asking !== null && asking === query ? 'Thinking…' : 'Ask'}
           </button>
         </form>
-        <label>
-          From <input type="date" value={filter.from ?? ''} onChange={(e) => setFilter({ ...filter, from: e.target.value || undefined })} />
-        </label>
-        <label>
-          To <input type="date" value={filter.to ?? ''} onChange={(e) => setFilter({ ...filter, to: e.target.value || undefined })} />
-        </label>
+        {/* One box: pick the dates, then Enter applies them to the map. */}
+        <form
+          className="datebox"
+          role="group"
+          aria-label="Date range"
+          onSubmit={(e) => {
+            e.preventDefault();
+            // Compare with the messages ThreadMap holds (local calendar days), not the whole WhatsApp history.
+            const day = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleDateString('en-CA', { timeZone: TZ }) : null);
+            const first = day(chat?.first_message_at);
+            const last = day(chat?.last_message_at);
+            const span = first && last ? `${fmtDay(first)} – ${fmtDay(last)}` : null;
+            if (first && last && ((dates.from && dates.from > last) || (dates.to && dates.to < first))) {
+              return setDateAlert({
+                level: 'error',
+                text: `No messages in that range. This map holds messages from ${span} only. Pick dates in that span, or use “Load older messages” to fetch earlier ones from your phone.`,
+              });
+            }
+            setFilter({ ...filter, from: dates.from || undefined, to: dates.to || undefined });
+            setDateAlert(
+              first && dates.from && dates.from < first
+                ? { level: 'warn', text: `Messages before ${fmtDay(first)} are not in this map yet, so the map starts there (it holds ${span}). Use “Load older messages” to fetch earlier ones.` }
+                : null,
+            );
+          }}
+        >
+          <label>
+            From <input type="date" value={dates.from ?? ''} max={dates.to || undefined} onChange={(e) => setDates({ ...dates, from: e.target.value || undefined })} />
+          </label>
+          <label>
+            To <input type="date" value={dates.to ?? ''} min={dates.from || undefined} onChange={(e) => setDates({ ...dates, to: e.target.value || undefined })} />
+          </label>
+          <button type="submit" className={datesChanged ? 'primary' : undefined} title="Show only messages between these dates">
+            Enter
+          </button>
+          {filter.from || filter.to ? (
+            <button
+              type="button"
+              title="Show all dates"
+              onClick={() => {
+                setFilter({ ...filter, from: undefined, to: undefined });
+                setDateAlert(null);
+              }}
+            >
+              Clear
+            </button>
+          ) : null}
+          {dateAlert ? (
+            <div className={`date-alert ${dateAlert.level}`} role="alert">
+              <strong>{dateAlert.level === 'error' ? 'Outside this map’s dates' : 'Partly outside this map’s dates'}</strong>
+              <span>{dateAlert.text}</span>
+              <button type="button" aria-label="Close" onClick={() => setDateAlert(null)}>
+                ×
+              </button>
+            </div>
+          ) : null}
+        </form>
         <div className="seg" role="group" aria-label="Review status filter">
           {(['missed', 'all', 'read'] as const).map((s) => (
             <button key={s} aria-pressed={filter.status === s} onClick={() => setFilter({ ...filter, status: s })}>

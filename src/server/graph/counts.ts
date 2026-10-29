@@ -82,11 +82,14 @@ export async function computeCounts(db: DbOrTx, scope: CountScope, filter: Conte
 
 /** Chat-level overall counts (unfiltered) plus pending-analysis (unassigned) messages. */
 export async function chatTotals(db: DbOrTx, userId: string, workspaceId: string, chatIds: string[]) {
-  if (!chatIds.length) return new Map<string, { total: number; missed: number; pending: number }>();
+  type Totals = { total: number; missed: number; pending: number; first_at: string | null; last_at: string | null };
+  if (!chatIds.length) return new Map<string, Totals>();
   const list = sql.join(chatIds.map((c) => sql`${c}::uuid`), sql`, `);
-  const r = await db.execute<{ chat_id: string; total: number; missed: number; pending: number }>(sql`
+  const r = await db.execute<{ chat_id: string; total: number; missed: number; pending: number; first_at: string | null; last_at: string | null }>(sql`
     SELECT m.chat_id,
       count(*)::int AS total,
+      to_char(min(m.sent_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS first_at,
+      to_char(max(m.sent_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_at,
       count(*) FILTER (WHERE NOT COALESCE(rs.status = 'read' AND rs.reviewed_revision = m.content_revision, false))::int AS missed,
       count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM placements p WHERE p.message_id = m.id AND p.chat_id = m.chat_id))::int AS pending
     FROM messages m
@@ -94,7 +97,7 @@ export async function chatTotals(db: DbOrTx, userId: string, workspaceId: string
     WHERE m.workspace_id = ${workspaceId}::uuid AND m.chat_id IN (${list})
       AND m.kind IN ('text','media') AND m.state = 'active' AND (m.expires_at IS NULL OR m.expires_at > now())
     GROUP BY m.chat_id`);
-  const out = new Map<string, { total: number; missed: number; pending: number }>();
-  for (const row of r.rows) out.set(row.chat_id, { total: row.total, missed: row.missed, pending: row.pending });
+  const out = new Map<string, Totals>();
+  for (const row of r.rows) out.set(row.chat_id, { total: row.total, missed: row.missed, pending: row.pending, first_at: row.first_at, last_at: row.last_at });
   return out;
 }

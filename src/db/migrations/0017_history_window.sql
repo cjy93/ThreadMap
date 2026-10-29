@@ -1,0 +1,1 @@
+ALTER TABLE "connection_status" ADD COLUMN "history_window_until" timestamp with time zone;

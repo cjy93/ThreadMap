@@ -157,7 +157,7 @@ const waSchema = z.object({
   WHATSAPP_INITIAL_SYNC_MODE: z.enum(['available_history', 'new_only']).default('available_history'),
   WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT: int(10_000),
   WHATSAPP_PRESELECTION_BUFFER_MIB: int(32),
-  WHATSAPP_PRESELECTION_BUFFER_TTL_SECONDS: int(300),
+  WHATSAPP_PRESELECTION_BUFFER_TTL_SECONDS: int(1800),
   WHATSAPP_MARK_ONLINE_ON_CONNECT: bool(false),
   // opened_chat_images: images in opened chats download right away so the vision model can read them;
   // video, voice and documents (and everything in on_demand mode) download only when the owner asks.

@@ -75,6 +75,8 @@ export interface ChatSummary {
   message_count: number;
   missed_count: number;
   pending_analysis_count: number;
+  first_message_at?: string | null;
+  last_message_at?: string | null;
   analysis: { pending_jobs: number; unread_messages?: number; budget_paused: boolean; failed: boolean; last_analysis_at: string | null };
   last_event_at: string | null;
 }

@@ -60,6 +60,12 @@ Recorded during implementation (25 Oct 2026). Each entry states the decision and
 - **Why a timeout, not "on close":** a browser cannot reliably report being closed — the unload signal also fires on reloads and navigation, and never fires on crashes, sleep or lost connections. Thirty minutes survives reloads and short drops.
 - **Trade-off:** capture no longer continues with the browser closed; reopening means scanning the QR again and rebuilding maps. `AUTO_DELETE_AFTER_MINUTES=0` turns it off (e.g. for development).
 
+## 30 minutes to choose chats (owner change, 29 Oct 2026)
+
+- **The pre-selection buffer holds unopened chats' linking history for 30 minutes** (`WHATSAPP_PRESELECTION_BUFFER_TTL_SECONDS=1800`, was 300), the same as auto-delete. Still memory only and bounded by `WHATSAPP_PRESELECTION_BUFFER_MIB` (32 MiB); it is never saved, logged or sent to a model, and an app restart, pause or disconnect clears it.
+- **After the window the chat list shows only opened chats.** A fresh QR scan sets `connection_status.history_window_until` (scan time + TTL); a restart without a scan sets it to null, since the memory buffer is gone. The Connect page counts down while it is open; once closed it explains that a chat opened now would start empty and that adding people or groups means *Disconnect & delete my data* and scanning again.
+- **Trade-off:** unopened chats' recent messages sit in server memory for up to 30 minutes instead of 5 — longer exposure to anyone with access to the server's memory, and up to 32 MiB per linked account held longer.
+
 ## Database on Supabase, encrypted connections (owner choice, 28 Oct 2026)
 
 - **Choice:** *connection + Supabase at-rest*. Once the database is on Supabase: Supabase's AES-256 at-rest encryption (always on), **Enforce SSL** switched on, and ThreadMap connecting with the Supabase CA (`DATABASE_CA_CERT_FILE`, `APP_MODE=hosted` so it refuses to start without one), certificate and hostname verified. Session pooler or direct connections only (the companion's advisory lock and LISTEN/NOTIFY break under transaction pooling).

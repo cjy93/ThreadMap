@@ -53,7 +53,7 @@ export async function listChats(db: Db, ctx: AuthCtx) {
         GROUP BY j.chat_id, j.status`)
     : { rows: [] };
   return indexed.map((c) => {
-    const t = totals.get(c.id) ?? { total: 0, missed: 0, pending: 0 };
+    const t = totals.get(c.id) ?? { total: 0, missed: 0, pending: 0, first_at: null, last_at: null };
     const js = jobs.rows.filter((j) => j.chat_id === c.id);
     return {
       id: c.id,
@@ -68,6 +68,9 @@ export async function listChats(db: Db, ctx: AuthCtx) {
       message_count: t.total,
       missed_count: t.missed,
       pending_analysis_count: t.pending,
+      // The span of messages ThreadMap holds, so a date range outside it can be flagged.
+      first_message_at: t.first_at,
+      last_message_at: t.last_at,
       analysis: {
         pending_jobs: js.filter((j) => j.status === 'pending' || j.status === 'running').reduce((n, j) => n + j.n, 0),
         budget_paused: js.some((j) => j.status === 'budget_paused'),

@@ -73,6 +73,8 @@ class Session {
   codeRequested = false;
   // The socket is linked and open (not merely pairing or closed).
   open = false;
+  // This session has been open before (so its buffer may still hold linking history).
+  everOpen = false;
   buffer: PreselectionBuffer;
   private timer?: ReturnType<typeof setTimeout>;
 
@@ -282,7 +284,16 @@ class Session {
       }
       await this.db.update(s.linkedAccounts).set({ connectionGeneration: sql`${s.linkedAccounts.connectionGeneration} + 1`, updatedAt: new Date() }).where(eq(s.linkedAccounts.id, this.accountId));
       const gap = this.disconnectedAt ? [{ from: this.disconnectedAt.toISOString(), to: new Date().toISOString(), reason: 'disconnected' }] : [];
-      await this.status('connected', null, { connectedSince: new Date() });
+      // A fresh scan opens the window in which unopened chats' history is held in memory. A
+      // first connect in this process without a scan (an app restart) holds nothing: the
+      // buffer is memory only. A later reconnect keeps whatever window was set.
+      const held = freshScan
+        ? { historyWindowUntil: new Date(Date.now() + this.c.deps.cfg.WHATSAPP_PRESELECTION_BUFFER_TTL_SECONDS * 1000) }
+        : this.everOpen
+          ? {}
+          : { historyWindowUntil: null };
+      this.everOpen = true;
+      await this.status('connected', null, { connectedSince: new Date(), ...held });
       // Appended separately: an upsert's VALUES cannot reference the existing row.
       if (gap.length) {
         await this.db
@@ -360,7 +371,7 @@ class Session {
     this.buffer.clear();
     await this.lease?.release();
     this.lease = undefined;
-    await this.status(state, detail);
+    await this.status(state, detail, { historyWindowUntil: null });
   }
 
   /**
@@ -420,7 +431,7 @@ class Session {
    * Older history for an opened chat, page after page (50 messages each) from the
    * phone, until WhatsApp has no more or the per-chat cap is reached. WhatsApp
    * sends a chat's full history only once, at linking, and ThreadMap keeps an
-   * unopened chat's messages in memory for just a few minutes, so a chat opened
+   * unopened chat's messages in memory for 30 minutes after a scan, so a chat opened
    * later would otherwise start with almost nothing. Paced like scrolling up in
    * WhatsApp Web; runs in the background so other commands are not held up.
    */
