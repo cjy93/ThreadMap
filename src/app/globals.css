@@ -539,3 +539,6 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .msg.ask-hit { border-left: 3px solid var(--resources); }
 .msg.ask-topic { border-left: 3px dashed var(--resources); }
 .ask-more { display: flex; justify-content: center; padding: 6px 0 14px; }
+/* Ask: words found inside the chats that contain what was typed. */
+.word-hits { margin: 8px 0 4px; }
+.pill.word-hit { border-color: var(--resources); color: var(--text); }

@@ -38,6 +38,8 @@ export interface AskResult {
   /** Nemotron is still reading the question: search again with ?interp=<this> once it has. */
   interpretation_pending?: string | null;
   terms: string[];
+  /** Words in the searched chats containing what was typed ("clip" -> "liceclip"), rarest first. */
+  word_hits?: { fragment: string; words: { word: string; messages: number }[] }[];
   results: {
     message_id: string;
     chat_id: string;

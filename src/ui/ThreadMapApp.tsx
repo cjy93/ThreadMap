@@ -344,7 +344,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
     try {
       const r = await api<{ answer: AskAnswer | null; note?: string; pending?: string }>('/api/ask/answer', {
         method: 'POST',
-        json: { q: res.query, chat: chatId ?? undefined, message_ids: res.results.map((x) => x.message_id) },
+        json: { q: res.query, chat: chatId ?? undefined, message_ids: res.results.map((x) => x.message_id), words: (res.word_hits ?? []).flatMap((h) => h.words.map((w) => w.word)) },
       });
       if (my !== askGen.current) return; // a newer question replaced this one
       if (r.pending) {
@@ -903,6 +903,22 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
               <div className="bubble ai-read">
                 <div className="ask-label">{searchRes.interpretation ? 'Nemotron’s reading' : 'Search'}</div>
                 {searchRes.interpretation ?? searchRes.note ?? 'Searching for these words (the model was not available):'}
+                {(searchRes.word_hits ?? [])
+                  .filter((h) => h.words.length)
+                  .map((h) => (
+                    <div key={h.fragment} className="word-hits">
+                      <div className="counts">
+                        Words in your chats containing “{h.fragment}”, rarest first (found before Nemotron read the question):
+                      </div>
+                      <div className="terms">
+                        {h.words.map((w) => (
+                          <span key={w.word} className="pill word-hit" title={`${w.messages} message${w.messages === 1 ? '' : 's'}`}>
+                            {w.word} <span className="counts">· {w.messages}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 {searchRes.terms.length ? (
                   <div className="terms">
                     {searchRes.terms.map((t) => (

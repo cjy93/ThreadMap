@@ -86,7 +86,7 @@ export const AskSchema = z.object({
 });
 
 /** Ask, second look: other names the chat uses for the same thing. */
-export const AliasSchema = z.object({ aliases: z.array(z.string().min(1).max(48)).max(8).default([]) });
+export const AliasSchema = z.object({ aliases: z.array(z.string().min(1).max(48)).max(8).default([]), parts: z.array(z.string().min(1).max(48)).max(8).default([]) });
 
 /** Root re-check: discussions to move to another root. */
 export const RootReviewSchema = z.object({ roots: z.array(z.object({ key: z.string().min(1).max(16), root: RootEnum })).max(200).default([]) });

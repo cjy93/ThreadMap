@@ -46,7 +46,7 @@ export interface Interpretation {
 }
 /** Still working (collect it later by this id), or could not answer (why). */
 export type NotYet = { pending: string } | { failed: string };
-export type Interpreter = (workspaceId: string, chatIds: string[], question: string) => Promise<Interpretation | NotYet | null>;
+export type Interpreter = (workspaceId: string, chatIds: string[], question: string, found?: string[]) => Promise<Interpretation | NotYet | null>;
 
 /** Why Nemotron could not answer, in words for the page. */
 export function modelProblem(reason: string): string {
@@ -99,6 +99,39 @@ const TYPED_TERM_WEIGHT = 5;
 // Results per page; the page asks for the next one (same terms, no new model call) as you scroll.
 export const ASK_PAGE_SIZE = 100;
 
+/** The pieces of the question searched inside words ("clip" in "LiceClip"): typed words of 3+ letters. */
+export const fragmentsOf = (question: string) => {
+  const words = normalizeSearch(question).split(/\s+/).filter(Boolean);
+  // A keyword search (up to 3 words); in a sentence ("show me ... about refresh") most words are filler.
+  return words.length > 3 ? [] : [...new Set(words.filter((w) => w.length >= 3))];
+};
+
+export interface WordHits {
+  fragment: string;
+  /** Words in the searched messages that contain the fragment, rarest first. */
+  words: { word: string; messages: number }[];
+}
+
+/**
+ * Before any model call: every distinct word in the searched messages that contains what was
+ * typed ("clip" -> "liceclip", "clips"), with how many messages use it, rarest first. Someone
+ * who half-remembers a name types part of it; these are the names it could be.
+ */
+export async function wordsContaining(db: Db, matching: ReturnType<typeof sql>, fragments: string[]): Promise<WordHits[]> {
+  const out: WordHits[] = [];
+  for (const f of fragments) {
+    const pattern = `[[:alnum:]_]*${f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[[:alnum:]_]*`;
+    const rows = await db.execute<{ word: string; n: number }>(sql`
+      WITH mt AS (${matching})
+      SELECT r.arr[1] AS word, count(DISTINCT m.id)::int AS n
+      FROM messages m JOIN mt ON mt.id = m.id CROSS JOIN LATERAL regexp_matches(m.search_text, ${pattern}, 'g') AS r(arr)
+      WHERE m.search_text LIKE ${likePattern(f)} AND length(r.arr[1]) <= 40
+      GROUP BY 1 ORDER BY 2, 1 LIMIT 12`);
+    out.push({ fragment: f, words: rows.rows.map((r) => ({ word: r.word, messages: r.n })) });
+  }
+  return out;
+}
+
 export interface ContextLine {
   sender: string;
   text: string;
@@ -146,45 +179,60 @@ export async function messageContext(db: Db, ids: string[]): Promise<Map<string,
  * and lists the renames, codenames and spellings they use ("davinci = Elucidex").
  * Read from the chat itself, so a name only this chat uses is found too.
  */
-async function aliasesFrom(deps: { db: Db; provider: ModelProvider; cfg: LlmConfig }, scope: { workspaceId: string; logicalJobId: string }, chatIds: string[], question: string, terms: string[]): Promise<string[]> {
+async function aliasesFrom(deps: { db: Db; provider: ModelProvider; cfg: LlmConfig }, scope: { workspaceId: string; logicalJobId: string }, chatIds: string[], question: string, terms: string[], known: string[] = terms): Promise<string[]> {
   if (!terms.length || !chatIds.length) return [];
   const values = sql.join(terms.map((t) => sql`(${t}, ${likePattern(t)})`), sql`, `);
-  const rows = await deps.db.execute<{ body: string }>(sql`
+  const rows = await deps.db.execute<{ id: string; body: string }>(sql`
     WITH terms(t, p) AS (VALUES ${values})
-    SELECT m.body FROM messages m
+    SELECT m.id, m.body FROM messages m
     WHERE m.chat_id IN (${sql.join(chatIds.map((c) => sql`${c}::uuid`), sql`, `)}) AND m.state = 'active' AND m.body IS NOT NULL
       AND EXISTS (SELECT 1 FROM terms WHERE ${termMatchSql(sql`terms.t`, sql`terms.p`)})
     ORDER BY m.sent_at DESC NULLS LAST LIMIT ${ALIAS_SAMPLE_MESSAGES}`);
   if (!rows.rows.length) return [];
+  // With the messages around each one: a name is often explained in the reply ("Conquercourse
+  // become Dojo?" -> "Dojo is just slow area of the game"), which need not repeat the name.
+  const around = await messageContext(deps.db, rows.rows.map((x) => x.id));
+  const withContext = rows.rows.map((x) => {
+    const c = around.get(x.id);
+    const line = (l?: ContextLine) => (l ? ` | ${l.rel} · ${l.sender}: ${l.text.slice(0, 160)}` : '');
+    return `${x.body.slice(0, 300)}${line(c?.before)}${line(c?.after)}`;
+  });
   const r = await callModel(deps, scope, {
     role: 'fast',
     operation: 'ask_alias',
-    ...aliasPrompt(question, rows.rows.map((x) => x.body.slice(0, 300))),
+    ...aliasPrompt(question, withContext, known),
     schema: AliasSchema,
     schemaName: 'alias',
     jsonSchema: JSON_SCHEMAS.alias,
     maxOutputTokens: 300,
     thinking: false,
   });
-  return r.value.aliases.map(normalizeSearch).filter((t) => t.length > 1);
+  return [...new Set([...r.value.aliases, ...r.value.parts].map(normalizeSearch).filter((t) => t.length > 1))];
 }
 
 /** Runs where the model key lives (the worker): question → terms and fitting topic ids. */
-export async function interpretRequest(deps: { db: Db; provider: ModelProvider; cfg: LlmConfig }, workspaceId: string, chatIds: string[], question: string): Promise<Interpretation> {
+export async function interpretRequest(deps: { db: Db; provider: ModelProvider; cfg: LlmConfig }, workspaceId: string, chatIds: string[], question: string, found: string[] = []): Promise<Interpretation> {
   const trees = new Map(await Promise.all(chatIds.map(async (c) => [c, await loadTree(deps.db, c)] as const)));
   // Topics are offered under short keys (t1…), as in every model call.
   const topics = topicListOf(trees, deps.cfg);
   const logicalJobId = crypto.randomUUID();
   await ensureLedger(deps.db, workspaceId, logicalJobId, deps.cfg);
-  const p = askPrompt(question, topics.map((t) => ({ id: t.key, path: t.path, locked: false })));
+  const p = askPrompt(question, topics.map((t) => ({ id: t.key, path: t.path, locked: false })), found);
   const r = await callModel(deps, { workspaceId, logicalJobId }, { role: 'fast', operation: 'ask', ...p, schema: AskSchema, schemaName: 'ask', jsonSchema: JSON_SCHEMAS.ask, maxOutputTokens: 800, thinking: false });
   const byKey = new Map(topics.map((t) => [t.key, t.id]));
   const terms = r.value.terms.map(normalizeSearch).filter((t) => t.length > 1);
-  // Then the chat's own other names for it; without them the terms still search.
-  const aliases = await aliasesFrom(deps, { workspaceId, logicalJobId }, chatIds, question, terms).catch(() => []);
+  // Then the chat's own other names for it, and the names of its parts; without them the terms still search.
+  const scope = { workspaceId, logicalJobId };
+  const first = await aliasesFrom(deps, scope, chatIds, question, terms).catch(() => []);
+  // One step further: a name found that way can have other names of its own, mentioned only
+  // next to it ("ninja" -> "conquercourse"; "Conquercourse become Dojo?" -> "dojo").
+  const fresh = first.filter((a) => !terms.includes(a));
+  const second = fresh.length ? await aliasesFrom(deps, scope, chatIds, question, fresh, [...terms, ...fresh]).catch(() => []) : [];
+  const aliases = [...new Set([...first, ...second])];
   return {
     interpretation: r.value.interpretation,
-    terms: [...new Set([...terms, ...aliases])],
+    // The main words first, then the chat's own names (specific, so kept), then the broader ones.
+    terms: [...new Set([...terms.slice(0, 4), ...aliases, ...terms.slice(4)])],
     topicIds: r.value.topic_keys.flatMap((k) => (byKey.has(k) ? [byKey.get(k)!] : [])),
   };
 }
@@ -192,11 +240,11 @@ export async function interpretRequest(deps: { db: Db; provider: ModelProvider; 
 /** Default interpreter for the web process: ask the worker and wait briefly for its answer. */
 export const viaWorker =
   (db: Db): Interpreter =>
-  async (workspaceId, chatIds, question) => {
+  async (workspaceId, chatIds, question, found = []) => {
     const { prepareAskReply } = await import('../events-hub');
     const id = crypto.randomUUID();
     const { reply } = await prepareAskReply(id, ASK_TIMEOUT_MS, { ws: workspaceId, kind: 'ask' });
-    await db.execute(sql`SELECT pg_notify(${ASK_CHANNEL}, ${JSON.stringify({ id, workspaceId, chatIds, question })})`);
+    await db.execute(sql`SELECT pg_notify(${ASK_CHANNEL}, ${JSON.stringify({ id, workspaceId, chatIds, question, found })})`);
     const r = await reply;
     if (!r) return { pending: id };
     return r.ok ? (r as unknown as Interpretation) : { failed: r.reason };
@@ -232,6 +280,11 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   // and when Nemotron is merely slow it searches again with its reading once that arrives.
   let note: string | null = null;
   let pending: string | null = null;
+  const matching = matchingMessagesSql({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds }, filter);
+  // First, plain text: the words in these chats that contain what was typed (no model involved).
+  const fragments = fragmentsOf(question);
+  const wordHits = chatIds.length && params.get('terms_json') === null ? await wordsContaining(db, matching, fragments) : [];
+  const foundWords = [...new Set(wordHits.flatMap((h) => h.words.map((w) => w.word)))];
   // A further page of the same search: the page sends back the terms and topics already used.
   const offset = Math.max(0, Math.min(1_000_000, Number(params.get('offset')) || 0));
   const given = params.get('terms_json');
@@ -248,7 +301,7 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
     chosen = (params.get('topics') ?? '').split(',').filter((id) => [...trees.values()].some((t) => t.nodes.has(id)));
   } else if (chatIds.length) {
     const lateId = params.get('interp');
-    const got = lateId ? await lateInterpretation(ctx.workspaceId, lateId) : await interpret(ctx.workspaceId, chatIds, question).catch(() => null);
+    const got = lateId ? await lateInterpretation(ctx.workspaceId, lateId) : await interpret(ctx.workspaceId, chatIds, question, foundWords).catch(() => null);
     let r: Interpretation | null = null;
     if (got && 'pending' in got) {
       pending = got.pending;
@@ -262,13 +315,16 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
       if (r.terms.length) terms = [...new Set(r.terms)].slice(0, MAX_TERMS);
       chosen = r.topicIds.filter((id) => [...trees.values()].some((t) => t.nodes.has(id)));
     }
+    // The words found inside the chats always search, whatever Nemotron made of the question.
+    terms = [...new Set([...foundWords, ...terms])].slice(0, MAX_TERMS + 12);
   }
   const topicIds = chosen.flatMap((id) => [...trees.values()].flatMap((t) => descendants(t, id)));
-  if (!chatIds.length || (!terms.length && !topicIds.length)) return { query: question, interpretation, note, interpretation_pending: pending, terms, results: [], topics: [], total: 0, next_offset: null };
+  if (!chatIds.length || (!terms.length && !topicIds.length)) return { query: question, interpretation, note, interpretation_pending: pending, terms, word_hits: wordHits, results: [], topics: [], total: 0, next_offset: null };
 
-  const matching = matchingMessagesSql({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds }, filter);
+  // Typed weight for a typed word and for any term containing one ("liceclip" for "clip").
   const typed = new Set(normalizeSearch(question).split(/\s+/));
-  const termValues = terms.length ? sql.join(terms.map((t) => sql`(${t}, ${likePattern(t)}, ${typed.has(t) ? TYPED_TERM_WEIGHT : 1}::int)`), sql`, `) : sql`(NULL::text, NULL::text, 0)`;
+  const isTyped = (t: string) => typed.has(t) || fragments.some((f) => t.includes(f));
+  const termValues = terms.length ? sql.join(terms.map((t) => sql`(${t}, ${likePattern(t)}, ${isTyped(t) ? TYPED_TERM_WEIGHT : 1}::int)`), sql`, `) : sql`(NULL::text, NULL::text, 0)`;
   const topicArray = topicIds.length ? sql`ARRAY[${sql.join(topicIds.map((id) => sql`${id}::uuid`), sql`, `)}]` : sql`ARRAY[]::uuid[]`;
   // Rare terms count more: someone searching usually wants a name or a term, not a common word.
   // A term's weight is scaled from 1x (in every message searched) up to 2x (in just one), by how
@@ -302,6 +358,7 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
     note,
     interpretation_pending: pending,
     terms,
+    word_hits: wordHits,
     filter_fingerprint: filterFingerprint({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds }, filter),
     // Every match counts; this page holds ASK_PAGE_SIZE of them from `offset`.
     total,
@@ -352,6 +409,8 @@ export async function answerQuestion(
   chatIds: string[],
   question: string,
   messageIds: string[],
+  /** Words in the chats containing what was typed ("liceclip" for "clip"); see wordsContaining. */
+  words: string[] = [],
 ): Promise<AnswerReply> {
   const { db } = deps;
   const chats = chatIds.length
@@ -440,7 +499,7 @@ export async function answerQuestion(
   const answers: Awaited<ReturnType<typeof ask>>[] = [];
   for (let i = 0; i < parts.length; i += ANSWER_PARTS_AT_ONCE) {
     const batch = parts.slice(i, i + ANSWER_PARTS_AT_ONCE);
-    answers.push(...(await Promise.all(batch.map((part, j) => ask(answerPrompt(question, i + j === 0 ? messages : [], part), 'answer')))));
+    answers.push(...(await Promise.all(batch.map((part, j) => ask(answerPrompt(question, i + j === 0 ? messages : [], part, words), 'answer')))));
   }
   const counts = { messages: messages.length, discussions: read };
   let out: AnswerReply;
@@ -464,17 +523,18 @@ export async function answerQuestion(
   return out;
 }
 
-type AnswerRunner = (chatIds: string[], question: string, messageIds: string[]) => Promise<AnswerReply | NotYet | null>;
+type AnswerRunner = (chatIds: string[], question: string, messageIds: string[], words?: string[]) => Promise<AnswerReply | NotYet | null>;
 
 /** Web side: ask the worker for the answer, then attach each cited message's sender and snippet. */
 export async function answer(db: Db, ctx: AuthCtx, body: unknown, run: AnswerRunner = answerViaWorker(db, ctx.workspaceId)) {
-  const b = (body ?? {}) as { q?: unknown; chat?: unknown; message_ids?: unknown };
+  const b = (body ?? {}) as { q?: unknown; chat?: unknown; message_ids?: unknown; words?: unknown };
+  const words = Array.isArray(b.words) ? b.words.filter((x): x is string => typeof x === 'string' && x.length <= 40).map(normalizeSearch).slice(0, 24) : [];
   const question = typeof b.q === 'string' ? b.q.trim() : '';
   if (question.length < 1 || question.length > 300) throw new SafeError('ask in 1–300 characters');
   const messageIds = Array.isArray(b.message_ids) ? b.message_ids.filter((x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x)).slice(0, ANSWER_MAX_MESSAGES) : [];
   const chats = typeof b.chat === 'string' ? [await requireChat(db, ctx, b.chat)] : await db.select().from(s.chats).where(and(eq(s.chats.workspaceId, ctx.workspaceId), eq(s.chats.excluded, false), eq(s.chats.selected, true)));
   if (!chats.length) return { answer: null, note: 'Open a chat first.' };
-  const r = await run(chats.map((c) => c.id), question, messageIds);
+  const r = await run(chats.map((c) => c.id), question, messageIds, words);
   if (!r) return { answer: null, note: 'Nemotron did not answer; the matching messages are listed below.' };
   // Still working: the page collects the answer from /api/ask/late/:id when it is ready.
   if ('pending' in r) return { answer: null, pending: r.pending, note: 'NVIDIA Nemotron is still working on the answer; it appears here when ready.' };
@@ -519,11 +579,11 @@ export async function withSources(db: Db, workspaceId: string, r: AnswerReply) {
 
 const answerViaWorker =
   (db: Db, workspaceId: string): AnswerRunner =>
-  async (chatIds, question, messageIds) => {
+  async (chatIds, question, messageIds, words = []) => {
     const { prepareAskReply } = await import('../events-hub');
     const id = crypto.randomUUID();
     const { reply } = await prepareAskReply(id, ANSWER_TIMEOUT_MS, { ws: workspaceId, kind: 'answer' });
-    await db.execute(sql`SELECT pg_notify(${ASK_CHANNEL}, ${JSON.stringify({ id, kind: 'answer', workspaceId, chatIds, question, messageIds })})`);
+    await db.execute(sql`SELECT pg_notify(${ASK_CHANNEL}, ${JSON.stringify({ id, kind: 'answer', workspaceId, chatIds, question, messageIds, words })})`);
     const r = await reply;
     if (!r) return { pending: id };
     return r.ok ? (r as unknown as AnswerReply) : { failed: r.reason };

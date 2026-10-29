@@ -42,7 +42,7 @@ export class FixtureModelProvider implements ModelProvider {
     else if (op === 'regroup') out = { groups: [] };
     else if (op === 'split') out = { parts: [] };
     // The fixture's expected counts include every message: nothing is filler here (tests stub their own).
-    else if (op === 'ask_alias') out = { aliases: [] };
+    else if (op === 'ask_alias') out = { aliases: [], parts: [] };
     else if (op === 'answers') out = { links: [] };
     // The fixture's roots are already right.
     else if (op === 'roots') out = { roots: [] };

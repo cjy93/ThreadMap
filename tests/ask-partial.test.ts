@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as s from '../src/db/schema';
 import { loadFixtureWorkspace } from '../src/fixtures/load';
 import { ask } from '../src/server/api/ask';
+import { answerPrompt } from '../src/server/ai/prompts';
 import type { AuthCtx } from '../src/server/api/service';
 import { ensurePrivateWorkspace } from '../src/server/workspace';
 import { normalizeSearch } from '../src/server/util';
@@ -61,6 +62,25 @@ describe('Ask: part of a word, ranked by what was typed, with context', () => {
     expect(first.next_offset).toBeNull();
     const rest = await page(4);
     expect(rest.results.map((x) => x.message_id)).toEqual(first.results.slice(4).map((x) => x.message_id));
+  });
+
+  it('first finds the words containing what was typed, and gives them to Nemotron and the search', async () => {
+    let seen: string[] = [];
+    // Nemotron's reading leaves "liceclip" out; the plain-text scan must still find it.
+    const r = await ask(t.db, auth, params('clip'), async (_ws, _c, _q, found) => {
+      seen = found ?? [];
+      return { interpretation: 'a clip', terms: ['clip', 'video'], topicIds: [] };
+    });
+    expect(r.word_hits).toEqual([{ fragment: 'clip', words: [{ word: 'liceclip', messages: 1 }] }]);
+    expect(seen).toEqual(['liceclip']);
+    expect(r.terms).toContain('liceclip');
+    expect(r.results[0].message_id).toBe(ids.tool);
+  });
+
+  it('tells the answer step which half-remembered words were found', () => {
+    const p = answerPrompt('clip', [], [], ['liceclip']);
+    expect(JSON.parse(p.user).words_in_chats).toEqual(['liceclip']);
+    expect(p.system).toContain('half-remembering');
   });
 
   it('gives each result the message around it, so a bare name says what it was about', async () => {
