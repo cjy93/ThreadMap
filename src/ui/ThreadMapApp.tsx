@@ -679,8 +679,12 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
         ) : null}
         {mode === 'private' && chat?.source === 'whatsapp' ? (
           <button
-            disabled={olderNote !== null}
-            title="Ask WhatsApp (via your phone) for the older messages it still has, 50 at a time, up to the per-chat limit. They join the Refresh count."
+            disabled={olderNote !== null || Boolean(map?.history_limited)}
+            title={
+              map?.history_limited
+                ? `This chat already has the ${map.history_limited.toLocaleString('en-US')} older messages ThreadMap keeps per chat (WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT); new messages are still saved.`
+                : 'Ask WhatsApp (via your phone) for the older messages it still has, 50 at a time, up to the per-chat limit. They join the Refresh count.'
+            }
             onClick={async () => {
               const id = chat.id;
               setOlderNote('Asking your phone for older messages…');
@@ -698,7 +702,7 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
               setTimeout(() => setOlderNote(null), 12000);
             }}
           >
-            Load older messages
+            {map?.history_limited ? 'Max limit reached' : 'Load older messages'}
           </button>
         ) : null}
         <form onSubmit={runSearch} role="search" className="askbox">

@@ -60,6 +60,8 @@ export interface MapResponse {
   /** When ThreadMap last asked the phone for this chat's older messages. */
   history_requested_at: string | null;
   history_loading: boolean;
+  /** The chat holds the most older messages ThreadMap keeps per chat (this many); null below the limit. */
+  history_limited?: number | null;
 }
 
 export interface ChatSummary {

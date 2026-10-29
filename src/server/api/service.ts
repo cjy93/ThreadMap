@@ -176,6 +176,8 @@ export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSe
       const [hist] = (
         await tx.execute<{ at: Date | null; loading: boolean }>(sql`SELECT max(created_at) AS at, COALESCE(max(created_at) > now() - interval '3 minutes', false) AS loading FROM connector_commands WHERE workspace_id = ${ctx.workspaceId}::uuid AND type = 'request_history' AND payload->>'chatId' = ${chatId}`)
       ).rows;
+      // At the per-chat history limit (WHATSAPP_HISTORY_MAX_MESSAGES_PER_CHAT): older pages would be dropped.
+      const [cov] = await tx.select({ state: s.syncCoverage.historyState, n: s.syncCoverage.historyCount }).from(s.syncCoverage).where(eq(s.syncCoverage.chatId, chatId));
       return {
         chat: { id: chat.id, title: chat.title, kind: chat.kind, source: chat.sourceKind },
         graph_version: g.g,
@@ -190,6 +192,7 @@ export async function getMap(db: Db, ctx: AuthCtx, chatId: string, params: URLSe
         history_requested_at: hist?.at ? new Date(hist.at).toISOString() : null,
         // Asked within the last few minutes: the phone's answer may still be on its way.
         history_loading: Boolean(hist?.loading),
+        history_limited: cov?.state === 'limited' ? cov.n : null,
         // Which map this is, and how far its analysis has got.
         side,
         analysis: await mapAnalysis(tx, mapId),
