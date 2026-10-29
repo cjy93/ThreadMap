@@ -4,6 +4,7 @@
 import { sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { isUuid, SafeError, sha256, stableJson } from '../util';
+import { courtesyOnlySql } from '../ai/smalltalk';
 
 export const StatusFilter = z.enum(['all', 'missed', 'read']);
 
@@ -106,7 +107,8 @@ export function matchingMessagesSql(scope: { userId: string; workspaceId: string
   }
   // Small talk leaves the map, except messages a Nemotron summary cites as its
   // source: what a summary says must be findable on the map.
-  if (!f.includeFiller) parts.push(sql`(m.filler IS NOT TRUE OR m.id IN (${citedMessagesSql(chatList)}))`);
+  // Courtesy-only messages ("Done", "Thank you") stay off even when a summary cites them.
+  if (!f.includeFiller) parts.push(sql`((m.filler IS NOT TRUE OR m.id IN (${citedMessagesSql(chatList)})) AND NOT ${courtesyOnlySql()})`);
   if (f.side) parts.push(f.side === 'mine' ? sql`m.direction = 'outgoing'` : sql`m.direction = 'incoming'`);
   if (f.status === 'missed') parts.push(sql`NOT COALESCE(${isReadSql()}, false)`);
   if (f.status === 'read') parts.push(sql`COALESCE(${isReadSql()}, false)`);

@@ -106,6 +106,13 @@
       "when": 1793244220547,
       "tag": "0014_study_maps",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1793300000000,
+      "tag": "0015_courtesy_small_talk",
+      "breakpoints": true
     }
   ]
 }

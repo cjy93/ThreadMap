@@ -11,6 +11,7 @@ import { ancestors, ensureRoots, loadTree, lockChat, ROOT_LABELS, type RootEnum,
 import { notifyChange } from '../notify';
 import { getStorage } from '../storage';
 import { sha256, sniffMime } from '../util';
+import { courtesyOnlySql } from './smalltalk';
 import { assignmentPrompt, describePrompt, extractionPrompt, fillerPrompt, linkPrompt, rootReviewPrompt, MAX_CHILD_TOPICS, refinementPrompt, regroupPrompt, splitPrompt, taxonomyPrompt, type PromptMessage, type TreeDigestNode, type UnitDigest } from './prompts';
 import type { FixtureHints } from './provider';
 import { BudgetExceededError, callModel, ensureLedger, estimateTokens, InvalidOutputError, type RouterDeps } from './router';
@@ -379,7 +380,7 @@ async function runMicrobatch(deps: PipelineDeps, job: Job, chat: Chat): Promise<
     if (!chat.mapOf) {
       await tx
         .update(s.messages)
-        .set({ filler: sql`${s.messages.id} IN (${sql.join([...filler, NIL_ID].map((id) => sql`${id}::uuid`), sql`, `)})` })
+        .set({ filler: sql`(${s.messages.id} IN (${sql.join([...filler, NIL_ID].map((id) => sql`${id}::uuid`), sql`, `)}) OR ${courtesyOnlySql(sql`${s.messages}`)})` })
         .where(inArray(s.messages.id, msgs.map((m) => m.id)));
     }
   });
@@ -1003,10 +1004,12 @@ export async function screenFiller(deps: PipelineDeps, job: Job, chat: Chat): Pr
   // Filler belongs to the messages; the chat's own map screens them.
   if (chat.mapOf) return 0;
   const started = Date.now();
+  // Small talk without asking: courtesy-only messages ("Done", "Thank you"), even when cited.
+  await db.execute(sql`UPDATE messages m SET filler = true WHERE m.chat_id = ${chat.id}::uuid AND m.filler IS NOT TRUE AND ${courtesyOnlySql()}`);
   // Content without asking: long messages, links, files, and anything a summary cites.
   await db.execute(sql`
     UPDATE messages m SET filler = false
-    WHERE m.chat_id = ${chat.id}::uuid AND m.filler IS NOT FALSE
+    WHERE m.chat_id = ${chat.id}::uuid AND m.filler IS NOT FALSE AND NOT ${courtesyOnlySql()}
       AND (m.id IN (${citedMessagesSql(sql`${chat.id}::uuid`)}) OR (m.filler IS NULL AND (m.kind <> 'text' OR length(COALESCE(m.body, '')) > ${FILLER_MAX_CHARS}
         OR EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id)
         OR EXISTS (SELECT 1 FROM resources r WHERE r.message_id = m.id))))`);

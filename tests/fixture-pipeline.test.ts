@@ -31,7 +31,8 @@ beforeAll(async () => {
 });
 afterAll(async () => t?.close());
 
-const allFilter = ContentFilterSchema.parse({ status: 'all' });
+// The manifest counts every message, small talk included ("Thanks!" is part of the dedup checks).
+const allFilter = ContentFilterSchema.parse({ status: 'all', includeFiller: true });
 
 async function pathMap(chatId: string) {
   const tree = await loadTree(t.db, chatId);
