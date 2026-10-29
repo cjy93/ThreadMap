@@ -8,7 +8,7 @@ import { nodeDiameter } from '../../lib/sizing';
 import type { Db, DbOrTx } from '../db';
 import { nodeContent } from '../graph/content';
 import { chatTotals, computeCounts } from '../graph/counts';
-import { filterFingerprint, matchingMessagesSql, parseContentFilter, parseDisplayDepth, type ContentFilter, type DisplayDepth } from '../graph/filters';
+import { filterFingerprint, matchingMessagesSql, parseContentFilter, parseDisplayDepth, validTimezone, type ContentFilter, type DisplayDepth } from '../graph/filters';
 import { sideMapOf, sideSql, type MapSide } from '../ai/pipeline';
 import { projectMap } from '../graph/projection';
 import { correctPlacement, editTopic, loadTree, pathOf } from '../graph/tree';
@@ -775,3 +775,20 @@ export async function listSmallTalk(db: Db, ctx: AuthCtx, chatId: string, params
     })),
   };
 }
+
+/**
+ * How many messages a chat holds on each day (in the viewer's time zone, the days the map's
+ * date filter uses), oldest first: the date slider spans exactly these days.
+ */
+export async function listChatDays(db: Db, ctx: AuthCtx, chatId: string, params: URLSearchParams) {
+  const chat = await requireChat(db, ctx, chatId);
+  const asked = params.get('tz');
+  const tz = asked && validTimezone(asked) ? asked : loadViewConfig().defaultTimezone;
+  const rows = await db.execute<{ day: string; n: number }>(sql`
+    SELECT to_char((m.sent_at AT TIME ZONE ${tz})::date, 'YYYY-MM-DD') AS day, count(*)::int AS n
+    FROM messages m
+    WHERE m.chat_id = ${chat.id}::uuid AND m.state = 'active' AND m.kind IN ('text', 'media') AND m.sent_at IS NOT NULL
+    GROUP BY 1 ORDER BY 1`);
+  return { tz, days: rows.rows };
+}
+

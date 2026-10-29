@@ -285,15 +285,20 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .askbox input { flex: 1; min-width: 0; }
 .datebox { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .datebox label { display: flex; align-items: center; gap: 4px; font-size: 13px; }
-.datebox { position: relative; }
-.date-alert { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: min(440px, 90vw); display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.4; background: var(--surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
-.date-alert.error { border: 1px solid #f87171; }
-.date-alert.warn { border: 1px solid #fbbf24; }
-.date-alert strong { grid-column: 1; }
-.date-alert.error strong { color: #f87171; }
-.date-alert.warn strong { color: #fbbf24; }
-.date-alert span { grid-column: 1; }
-.date-alert button { grid-column: 2; grid-row: 1 / span 2; align-self: start; padding: 2px 8px; }
+/* Date slider (DateRange.tsx): two handles over the days this chat has messages, with a bar per
+   day showing how busy it was; the chosen days are highlighted. */
+.daterange { min-width: min(420px, 100%); }
+.dr-body { display: grid; gap: 2px; flex: 1; min-width: 240px; }
+.dr-track { position: relative; height: 30px; }
+.dr-bars { position: absolute; inset: 0 7px 12px; display: flex; align-items: flex-end; gap: 1px; pointer-events: none; }
+.dr-bars span { flex: 1; min-width: 1px; border-radius: 1px; background: var(--border-strong); }
+.dr-bars span.on { background: var(--knowledge); }
+.dr-track input[type='range'] { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; margin: 0; height: 14px; background: none; pointer-events: none; -webkit-appearance: none; appearance: none; }
+.dr-track input[type='range']::-webkit-slider-runnable-track { height: 2px; background: var(--border); }
+.dr-track input[type='range']::-moz-range-track { height: 2px; background: var(--border); }
+.dr-track input[type='range']::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 14px; height: 14px; margin-top: -6px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); cursor: grab; }
+.dr-track input[type='range']::-moz-range-thumb { pointer-events: auto; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid var(--surface); cursor: grab; }
+.dr-label { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bubble { padding: 8px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 8px; max-width: 92%; font-size: 14px; }
 .bubble.mine { margin-left: auto; background: var(--accent-soft); }
 .bubble .terms { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }

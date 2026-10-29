@@ -40,5 +40,6 @@ describe('re-reading a chat from scratch', () => {
     const survivors = await count(sql`SELECT count(*)::int AS n FROM analysis_units WHERE id IN (${sql.join(oldUnits.map((id) => sql`${id}::uuid`), sql`, `)})`);
     expect(survivors).toBe(0);
     expect(await count(sql`SELECT count(*)::int AS n FROM analysis_units WHERE chat_id = ${chatId}::uuid`)).toBeGreaterThan(0);
-  });
+    // Runs the whole pipeline twice: slow when the full suite runs in parallel.
+  }, 30_000);
 });
