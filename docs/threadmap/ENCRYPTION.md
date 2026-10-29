@@ -27,7 +27,8 @@ search out of the database.
 > made linking and history sync fail — see DECISIONS). Enforce SSL verified on it the same way
 > (`ESSLREQUIRED` without SSL; TLS 1.3 with `verify-full`); the same CA file works (Supabase
 > uses one root CA for all projects). Being empty, it needed `bootstrap-origin` and a new
-> WhatsApp link. `.env` and `.env.supabase` hold its Session pooler URL. The Tokyo project is
+> WhatsApp link. Its Session pooler URL is `DATABASE_URL` in `.env.compose` (since 29 Oct;
+> `.env` and `.env.supabase` are no longer used). The Tokyo project is
 > no longer used.
 >
 > **Done 28 Oct 2026** (first project `tczzpsmsbqgdslaisrwt`, Tokyo `ap-northeast-1`, PostgreSQL 17.6):

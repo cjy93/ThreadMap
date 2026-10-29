@@ -72,7 +72,7 @@ This deletes every account, chat, map and file. Afterwards WhatsApp must be link
 
 ```bash
 docker compose -p tmlocal rm -sf app                      # stop the app (frees its connections)
-docker run --rm --env-file .env -v "$PWD/deploy/vm/supabase-ca.crt:/ca.crt:ro"   -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/ca.crt postgres:17-alpine   sh -c 'psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "
+docker run --rm --env-file <(grep '^DATABASE_URL=' .env.compose) -v "$PWD/deploy/vm/supabase-ca.crt:/ca.crt:ro"   -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/ca.crt postgres:17-alpine   sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "
     DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA IF EXISTS pgboss CASCADE;
     DROP SCHEMA public CASCADE; CREATE SCHEMA public;
     GRANT ALL ON SCHEMA public TO postgres;
@@ -124,7 +124,7 @@ On Windows, if Docker is installed only inside WSL, run these commands from a WS
 ## Security and encryption
 
 - **WhatsApp login** (credentials and Signal keys) is encrypted by ThreadMap itself (AES-256-GCM, `WHATSAPP_AUTH_ENCRYPTION_KEY`) before it reaches the database.
-- **Database: Supabase** (since 28 Oct 2026; Singapore `ap-southeast-1` since 29 Oct, PostgreSQL 17). Supabase encrypts data at rest (AES-256); *Enforce SSL* is on, and ThreadMap verifies Supabase's certificate and hostname on every connection (`DATABASE_CA_CERT_FILE`), through the session pooler. Locally this is switched on by the git-ignored `compose.override.yaml` + `.env` (`SUPABASE_DB_URL`); delete the override to fall back to the local `db` container. Remaining steps are in [`docs/threadmap/ENCRYPTION.md`](docs/threadmap/ENCRYPTION.md) ("set up encryption"). Message text itself is not encrypted by the app (by choice), so it stays searchable in the database.
+- **Database: Supabase** (since 28 Oct 2026; Singapore `ap-southeast-1` since 29 Oct, PostgreSQL 17). Supabase encrypts data at rest (AES-256); *Enforce SSL* is on, and ThreadMap verifies Supabase's certificate and hostname on every connection (`DATABASE_CA_CERT_FILE`), through the session pooler. Locally this is switched on by the git-ignored `compose.override.yaml`; the address is `DATABASE_URL` in `.env.compose` (Supabase's Session pooler URI), the only secrets file. Delete the override to fall back to the local `db` container. Remaining steps are in [`docs/threadmap/ENCRYPTION.md`](docs/threadmap/ENCRYPTION.md) ("set up encryption"). Message text itself is not encrypted by the app (by choice), so it stays searchable in the database.
 - **Deletion:** *Disconnect and delete my data*, or no ThreadMap page open for 30 minutes, deletes the account with all its data and files.
 
 ## Honest limitations

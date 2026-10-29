@@ -9,7 +9,7 @@ Supabase, so the instance only runs the ThreadMap app.
 | What | How it gets there |
 |---|---|
 | All source code | `git clone` from GitHub (only what has been **pushed**) |
-| `.env.compose`, `.env.supabase`, `deploy/vm/supabase-ca.crt` | Uploaded by the owner from the PC — they hold the secrets and are git-ignored, so GitHub never has them |
+| `.env.compose`, `deploy/vm/supabase-ca.crt` | Uploaded by the owner from the PC — they hold the secrets and are git-ignored, so GitHub never has them |
 
 ## Steps
 
@@ -30,10 +30,9 @@ cd ThreadMap
 This gives `main`, the latest version — no branch to switch to.
 (Private repo: sign in with a GitHub personal access token, or `gh auth login`.)
 
-**4. Upload the three secret files** into the instance (JupyterLab's **Upload** button, or
+**4. Upload the two secret files** into the instance (JupyterLab's **Upload** button, or
 `scp` from the PC after `brev login`):
-- `ThreadMap\.env.compose`
-- `ThreadMap\.env.supabase`
+- `ThreadMap\.env.compose` (it also holds the Supabase address, `DATABASE_URL`)
 - `ThreadMap\deploy\vm\supabase-ca.crt` → put it at `ThreadMap/deploy/vm/supabase-ca.crt` on the instance
 
 Files starting with a dot can be hidden in the Windows file picker — type the name.
@@ -46,7 +45,7 @@ cannot, open ports 80/443 instead and use `--profile https` — see `README.md` 
 
 | Line | Value |
 |---|---|
-| `SUPABASE_DB_URL=` | the connection string from `.env.supabase` |
+| `SUPABASE_DB_URL=` | the `DATABASE_URL` value from `.env.compose` |
 | `WHATSAPP_AUTH_ENCRYPTION_KEY=` | **exactly** as in `.env.compose` (else the WhatsApp link stored in Supabase cannot be decrypted → QR rescan) |
 | `BETTER_AUTH_SECRET=`, `NEBIUS_API_KEY=` | as in `.env.compose` |
 | `LLM_UNLIMITED_PHONES=` | as in `.env.compose` |
