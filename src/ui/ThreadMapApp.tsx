@@ -700,6 +700,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
             total={map.chat_totals.message_count}
             pending={map.chat_totals.pending_analysis_count}
             jobs={analysis?.pending_jobs ?? 0}
+            unread={analysis?.unread_messages ?? 0}
             failed={Boolean(analysis?.failed)}
             budgetPaused={Boolean(analysis?.budget_paused)}
             onRefresh={mode === 'private' && chat.source === 'whatsapp' && !refreshing ? () => void refreshAnalysis(chat.id) : undefined}

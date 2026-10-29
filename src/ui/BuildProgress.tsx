@@ -10,6 +10,8 @@ interface Props {
   pending: number;
   /** Analysis jobs queued or running. */
   jobs: number;
+  /** Messages Nemotron has still to read in this build (queued or in a running batch). */
+  unread: number;
   failed: boolean;
   budgetPaused: boolean;
   onRefresh?: () => void;
@@ -20,22 +22,23 @@ function eta(ms: number) {
   return min < 1 ? 'under a minute left' : min === 1 ? 'about 1 minute left' : `about ${min} minutes left`;
 }
 
-export function BuildProgress({ chatKey, total, pending, jobs, failed, budgetPaused, onRefresh }: Props) {
-  // Recent (time, jobs left) readings for this chat; how fast jobs finish gives the estimate
-  // (messages only reach the map at the end of a build, so their count is a poor clock).
-  const [samples, setSamples] = useState<{ key: string; list: { t: number; jobs: number }[] }>({ key: chatKey, list: [] });
+export function BuildProgress({ chatKey, total, pending, jobs, unread, failed, budgetPaused, onRefresh }: Props) {
+  // Recent (time, messages left to read) readings for this chat; how fast they are read gives
+  // the estimate. Counting messages, not jobs, covers the whole build: jobs exist only for the
+  // batches made so far, and messages reach the map only at the end.
+  const [samples, setSamples] = useState<{ key: string; list: { t: number; unread: number }[] }>({ key: chatKey, list: [] });
   useEffect(() => {
     const now = Date.now();
     setSamples((cur) => {
       const list = cur.key === chatKey ? [...cur.list] : [];
-      if (list.length && list[list.length - 1].jobs === jobs) return cur.key === chatKey ? cur : { key: chatKey, list };
-      // A new run (jobs went up) starts a fresh estimate.
-      if (list.length && jobs > list[list.length - 1].jobs) list.length = 0;
-      list.push({ t: now, jobs });
+      if (list.length && list[list.length - 1].unread === unread) return cur.key === chatKey ? cur : { key: chatKey, list };
+      // More to read (new history arrived, or a new run) starts a fresh estimate.
+      if (list.length && unread > list[list.length - 1].unread) list.length = 0;
+      list.push({ t: now, unread });
       while (list.length > 2 && now - list[0].t > 5 * 60_000) list.shift();
       return { key: chatKey, list };
     });
-  }, [chatKey, jobs]);
+  }, [chatKey, unread]);
   const list = samples.key === chatKey ? samples.list : [];
   // Click to fold the box into a small pill (and back); remembered on this browser.
   const [folded, setFolded] = useState(false);
@@ -57,23 +60,25 @@ export function BuildProgress({ chatKey, total, pending, jobs, failed, budgetPau
     });
 
   if (jobs > 0) {
-    const placed = Math.max(0, total - pending);
-    const pct = total ? Math.round((placed / total) * 100) : 0;
-    let note = 'estimating time left…';
-    if (pending === 0) note = 'adding deeper topics and grouping related ones';
-    else if (list.length >= 2) {
-      const first = list[0];
-      const last = list[list.length - 1];
-      const rate = (first.jobs - last.jobs) / (last.t - first.t); // jobs per ms
-      // Plus a little for laying out the topics once reading is done.
-      if (rate > 0) note = eta(last.jobs / rate + 60_000);
+    const reading = unread > 0;
+    const read = Math.max(0, total - unread);
+    const pct = total ? Math.round((read / total) * 100) : 0;
+    let note = 'all messages read · laying out the topics';
+    if (reading) {
+      note = 'estimating time left…';
+      if (list.length >= 2) {
+        const first = list[0];
+        const last = list[list.length - 1];
+        const rate = (first.unread - last.unread) / (last.t - first.t); // messages per ms
+        if (rate > 0) note = `${eta(last.unread / rate)} to read them all, then the topics are laid out`;
+      }
     }
     if (folded) {
       return (
         <button className="build-progress folded" onClick={toggle} aria-expanded={false} title="Show map building progress">
-          ▸ Building the map · {pending === 0 ? 'grouping' : `${pct}%`}
+          ▸ Building the map · {reading ? `${pct}% read` : 'laying out topics'}
           <span className="bp-bar" aria-hidden>
-            <span style={{ width: `${pending === 0 ? 100 : pct}%` }} className={pending === 0 ? 'busy' : undefined} />
+            <span style={{ width: `${reading ? pct : 100}%` }} className={reading ? undefined : 'busy'} />
           </span>
         </button>
       );
@@ -81,13 +86,13 @@ export function BuildProgress({ chatKey, total, pending, jobs, failed, budgetPau
     return (
       <div className="build-progress" role="status" aria-live="polite" onClick={toggle} title="Click to hide">
         <div className="bp-text">
-          <strong>Building the map:</strong> {placed.toLocaleString('en-US')} of {total.toLocaleString('en-US')} messages placed · {note}
+          <strong>Building the map:</strong> {read.toLocaleString('en-US')} of {total.toLocaleString('en-US')} messages read · {note}
         </div>
-        <div className="bp-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label="Messages placed on the map">
-          <span style={{ width: `${pending === 0 ? 100 : pct}%` }} className={pending === 0 ? 'busy' : undefined} />
+        <div className="bp-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={reading ? pct : 100} aria-label="Messages read by Nemotron">
+          <span style={{ width: `${reading ? pct : 100}%` }} className={reading ? undefined : 'busy'} />
         </div>
         <div className="bp-sub">
-          The first build is the slowest: Nemotron reads every message in batches, then lays out the topics, so the bar can stay still for a while before jumping. After that, Refresh only places new messages, and Rebuild map reuses what was already read.
+          The first build is the slowest: Nemotron reads every message in batches, then lays out the topics, and the messages appear on the map once that is done. After that, Refresh only reads new messages, and Rebuild map reuses what was already read.
         </div>
       </div>
     );

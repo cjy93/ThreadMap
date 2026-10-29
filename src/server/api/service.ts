@@ -109,8 +109,15 @@ async function mapFor(db: DbOrTx, chatId: string, params: URLSearchParams): Prom
 async function mapAnalysis(db: DbOrTx, mapId: string) {
   const js = (await db.execute<{ status: string; n: number }>(sql`
     SELECT j.status, count(*)::int AS n FROM analysis_jobs j WHERE j.chat_id = ${mapId}::uuid AND j.status IN ('pending','running','budget_paused','failed') AND ${currentBuildOnly} GROUP BY j.status`)).rows;
+  // Messages Nemotron has still to read: not yet handed to a batch, or in a batch not finished.
+  // Unlike the job count, this covers the whole build, so the time estimate can too.
+  const [unread] = (await db.execute<{ n: number }>(sql`
+    SELECT (SELECT count(*) FROM analysis_outbox o WHERE o.chat_id = ${mapId}::uuid AND o.dispatched_job_id IS NULL)::int
+      + (SELECT coalesce(sum(jsonb_array_length(j.input_messages)), 0) FROM analysis_jobs j
+         WHERE j.chat_id = ${mapId}::uuid AND j.kind = 'microbatch' AND j.status IN ('pending','running'))::int AS n`)).rows;
   return {
     pending_jobs: js.filter((j) => j.status === 'pending' || j.status === 'running').reduce((n, j) => n + j.n, 0),
+    unread_messages: unread?.n ?? 0,
     budget_paused: js.some((j) => j.status === 'budget_paused'),
     failed: js.some((j) => j.status === 'failed'),
   };

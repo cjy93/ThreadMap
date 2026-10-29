@@ -56,7 +56,7 @@ export interface MapResponse {
   /** Which map this is: the chat's own (null), or its map from one side's messages. */
   side: 'mine' | 'others' | null;
   /** How far this map's analysis has got. */
-  analysis: { pending_jobs: number; budget_paused: boolean; failed: boolean };
+  analysis: { pending_jobs: number; unread_messages?: number; budget_paused: boolean; failed: boolean };
   /** When ThreadMap last asked the phone for this chat's older messages. */
   history_requested_at: string | null;
   history_loading: boolean;
@@ -73,7 +73,7 @@ export interface ChatSummary {
   message_count: number;
   missed_count: number;
   pending_analysis_count: number;
-  analysis: { pending_jobs: number; budget_paused: boolean; failed: boolean; last_analysis_at: string | null };
+  analysis: { pending_jobs: number; unread_messages?: number; budget_paused: boolean; failed: boolean; last_analysis_at: string | null };
   last_event_at: string | null;
 }
 
