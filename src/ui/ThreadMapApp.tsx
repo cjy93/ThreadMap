@@ -58,6 +58,12 @@ type AnswerState = { state: 'loading'; note?: string } | { state: 'done'; answer
 
 export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | 'demo'; ownAccount?: boolean }) {
   const initial = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  // Refreshing the app goes to the landing page (the owner's choice); links and buttons into
+  // the app still open it directly.
+  useEffect(() => {
+    const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+    if (nav?.type === 'reload') window.location.replace('/');
+  }, []);
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [chatId, setChatId] = useState<string | null>(initial.get('chat'));
   const [filter, setFilter] = useState<FilterState>({
