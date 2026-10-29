@@ -89,7 +89,9 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const moreRef = useRef<HTMLDivElement | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [asking, setAsking] = useState(false);
+  // The question being searched right now (null when idle). A new question may be asked at any
+  // time, e.g. to fix a typo; it replaces this one, whose late results are then ignored.
+  const [asking, setAsking] = useState<string | null>(null);
   const [olderNote, setOlderNote] = useState<string | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const refreshAnalysis = async (id: string) => {
@@ -336,13 +338,14 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
     const my = ++askGen.current;
     setStarred(null);
     setSmallTalk(null);
-    setAsking(true);
+    setAsking(query);
     setAnswer(null);
     let res: SearchResult;
     try {
       const askParams = { q: query, ...filterParams(viewFilter), chat: chatId ?? undefined };
       askParamsRef.current = askParams;
       res = await api<SearchResult>(`/api/ask?${qs(askParams)}`);
+      if (my !== askGen.current) return; // a newer question replaced this one
       setSearchRes(res);
       setConceptMap(true);
       setHeadFolded(true);
@@ -356,7 +359,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
         });
       }
     } finally {
-      setAsking(false);
+      if (my === askGen.current) setAsking(null);
     }
     // Then Nemotron reads the matches (and the chat's discussion summaries) and answers; this takes longer.
     setAnswer({ state: 'loading' });
@@ -637,8 +640,8 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
             Ask about this chat
           </label>
           <input id="q" type="search" placeholder="Ask: e.g. where did we decide the venue? photos of the poster" value={query} onChange={(e) => setQuery(e.target.value)} />
-          <button className="primary" disabled={asking || !query.trim()}>
-            {asking ? 'Thinking…' : 'Ask'}
+          <button className="primary" disabled={!query.trim()} title={asking !== null ? 'Ask again: a new question replaces the one still running' : undefined}>
+            {asking !== null && asking === query ? 'Thinking…' : 'Ask'}
           </button>
         </form>
         <label>
