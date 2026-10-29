@@ -37,7 +37,7 @@ npm ci
 docker run -d --name tm-pg -e POSTGRES_USER=threadmap -e POSTGRES_PASSWORD=devpass -e POSTGRES_DB=threadmap -p 5432:5432 postgres:17-alpine
 export DATABASE_URL=postgres://threadmap:devpass@127.0.0.1:5432/threadmap
 npm run db:migrate
-npm test                 # 127 integration/unit tests against real PostgreSQL
+npm test                 # 137 integration/unit tests against real PostgreSQL
 npm run lint && npm run typecheck
 npm run image:build      # production image (docker build -t threadmap:local .)
 ```
@@ -65,6 +65,26 @@ docker compose -p tmlocal logs -f app  # watch startup (Ctrl+C stops following, 
 ```
 
 If `up -d` reports nothing to recreate, force it with `docker compose -p tmlocal up -d --force-recreate migrate app`. Then hard-refresh the browser (Ctrl+Shift+R) so it doesn't use cached styles.
+
+### Start from an empty database (delete all data)
+
+This deletes every account, chat, map and file. Afterwards WhatsApp must be linked again. With the database on Supabase (`compose.override.yaml`), run in WSL from the repo folder:
+
+```bash
+docker compose -p tmlocal rm -sf app                      # stop the app (frees its connections)
+docker run --rm --env-file .env -v "$PWD/deploy/vm/supabase-ca.crt:/ca.crt:ro"   -e PGSSLMODE=verify-full -e PGSSLROOTCERT=/ca.crt postgres:17-alpine   sh -c 'psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -c "
+    DROP SCHEMA IF EXISTS drizzle CASCADE; DROP SCHEMA IF EXISTS pgboss CASCADE;
+    DROP SCHEMA public CASCADE; CREATE SCHEMA public;
+    GRANT ALL ON SCHEMA public TO postgres;
+    GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;"'
+docker volume rm tmlocal_tm-objects                       # stored photos and files
+docker compose -p tmlocal up -d                           # migrate recreates every table
+docker compose -p tmlocal exec app sh -c 'node dist/cli/bootstrap-origin.js "$DEPLOYMENT_ID" http://localhost:3000'
+```
+
+- Drop **all four** schemas: the migration history lives in `drizzle`; if it survives, `migrate` thinks everything is applied, creates nothing, and the app crash-loops on missing tables.
+- The last line is needed on every empty database (also a new Supabase project): until it runs, the page says *starting up* and linking is disabled.
+- Before linking again, remove the old **Ubuntu** entry under WhatsApp → Linked Devices: the wipe does not tell the phone.
 
 Other everyday commands:
 
@@ -104,7 +124,7 @@ On Windows, if Docker is installed only inside WSL, run these commands from a WS
 ## Security and encryption
 
 - **WhatsApp login** (credentials and Signal keys) is encrypted by ThreadMap itself (AES-256-GCM, `WHATSAPP_AUTH_ENCRYPTION_KEY`) before it reaches the database.
-- **Database: Supabase** (since 28 Oct 2026; Tokyo, PostgreSQL 17). Supabase encrypts data at rest (AES-256); *Enforce SSL* is on, and ThreadMap verifies Supabase's certificate and hostname on every connection (`DATABASE_CA_CERT_FILE`), through the session pooler. Locally this is switched on by the git-ignored `compose.override.yaml` + `.env` (`SUPABASE_DB_URL`); delete the override to fall back to the local `db` container. Remaining steps are in [`docs/threadmap/ENCRYPTION.md`](docs/threadmap/ENCRYPTION.md) ("set up encryption"). Message text itself is not encrypted by the app (by choice), so it stays searchable in the database.
+- **Database: Supabase** (since 28 Oct 2026; Singapore `ap-southeast-1` since 29 Oct, PostgreSQL 17). Supabase encrypts data at rest (AES-256); *Enforce SSL* is on, and ThreadMap verifies Supabase's certificate and hostname on every connection (`DATABASE_CA_CERT_FILE`), through the session pooler. Locally this is switched on by the git-ignored `compose.override.yaml` + `.env` (`SUPABASE_DB_URL`); delete the override to fall back to the local `db` container. Remaining steps are in [`docs/threadmap/ENCRYPTION.md`](docs/threadmap/ENCRYPTION.md) ("set up encryption"). Message text itself is not encrypted by the app (by choice), so it stays searchable in the database.
 - **Deletion:** *Disconnect and delete my data*, or no ThreadMap page open for 30 minutes, deletes the account with all its data and files.
 
 ## Honest limitations

@@ -18,7 +18,8 @@ on `main` and push it to `https://github.com/cjy93/ThreadMap.git` (`git push ori
 so the clone has them.
 
 **2. On brev.nvidia.com — create and open the instance.** A CPU instance with Docker
-(2 vCPU / 8 GB is enough). Open a terminal on it: the instance's **Open Notebook**
+(2 vCPU / 8 GB is enough). If Brev offers a choice of region, pick one in Asia (ideally
+Singapore): the database is on Supabase in Singapore, and the app makes many small queries. Open a terminal on it: the instance's **Open Notebook**
 (JupyterLab) → **File → New → Terminal**, or `brev shell <instance>` with the Brev CLI on the PC.
 
 **3. On the instance — get the code.**

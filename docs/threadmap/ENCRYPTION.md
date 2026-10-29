@@ -22,7 +22,15 @@ search out of the database.
 
 ### 1. Supabase: refuse unencrypted connections
 
-> **Done 28 Oct 2026** (project `tczzpsmsbqgdslaisrwt`, Tokyo `ap-northeast-1`, PostgreSQL 17.6):
+> **Current database (29 Oct 2026): a new, empty Supabase project in Singapore
+> (`ap-southeast-1`)**, chosen to be close to the owner (Tokyo was ~70 ms per query, which
+> made linking and history sync fail — see DECISIONS). Enforce SSL verified on it the same way
+> (`ESSLREQUIRED` without SSL; TLS 1.3 with `verify-full`); the same CA file works (Supabase
+> uses one root CA for all projects). Being empty, it needed `bootstrap-origin` and a new
+> WhatsApp link. `.env` and `.env.supabase` hold its Session pooler URL. The Tokyo project is
+> no longer used.
+>
+> **Done 28 Oct 2026** (first project `tczzpsmsbqgdslaisrwt`, Tokyo `ap-northeast-1`, PostgreSQL 17.6):
 > Enforce SSL switched on — verified: a connection with `sslmode=disable` is refused
 > (`ESSLREQUIRED`), and `sslmode=verify-full` with the downloaded CA succeeds through the
 > session pooler. The CA is at `deploy/vm/supabase-ca.crt` on the owner's machine (copy it
@@ -51,7 +59,7 @@ search out of the database.
 > - NVIDIA Brev: `deploy/vm/compose.supabase.yaml` (hosted mode, CA required, no bundled
 >   database), ready for when the instance is set up.
 >
-> **Migration, 28 Oct 2026:** the database was migrated (all 57 tables'
+> **Migration, 28 Oct 2026** (to the Tokyo project; superseded by the empty Singapore project): the database was migrated (all 57 tables'
 > row counts matched) and the local ThreadMap runs on Supabase through
 > `compose.override.yaml` (git-ignored): all three connections use the session pooler with
 > `DATABASE_CA_CERT_FILE` (certificate + hostname verified), pools capped (see above). The URL is in the
