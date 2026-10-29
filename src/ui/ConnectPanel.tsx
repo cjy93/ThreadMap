@@ -238,6 +238,10 @@ export function ConnectPanel({
     );
   return (
     <div className="connect-page">
+      {/* Home without signing out: signing out deletes this account's data. */}
+      <a className="connect-home" href="/?home=1">
+        <button>← Home page</button>
+      </a>
       <header className="connect-hero">
         <div className="jkicker">Link · Choose · Map</div>
         <h2>See your chat universe</h2>
@@ -406,6 +410,9 @@ export function ConnectPanel({
             Opening a chat stores its messages, asks your phone for its recent history and lets NVIDIA Nemotron map it. The first build is the slowest; after that, Refresh only
             reads new messages.
           </p>
+          <div className="jactions">
+            <button onClick={onClose}>Back to maps</button>
+          </div>
         </JourneyStep>
       </ol>
 
@@ -426,13 +433,6 @@ export function ConnectPanel({
         </details>
       ) : null}
       <MadeBy />
-      <p className="connect-foot">
-        <button onClick={onClose}>Back to maps</button>
-        {/* Home without signing out: signing out deletes this account's data. */}
-        <a href="/?home=1">
-          <button>Home page</button>
-        </a>
-      </p>
     </div>
   );
 }

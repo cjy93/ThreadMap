@@ -1,6 +1,6 @@
 'use client';
 // ThreadMap at a glance, as a small solar system: three orbits around the ThreadMap star —
-// guardrails (inner), what it is built with (middle) and features (outer) — one planet per
+// guardrails (inner), what it is built with (middle) and features (outer): one planet per
 // topic. Click a planet for a one- or two-line card under the sky. Our own SVG and CSS
 // (globals.css "Orbit scene"); still under prefers-reduced-motion.
 import { useState } from 'react';
@@ -38,14 +38,37 @@ interface Planet {
   label: string;
   kind: 'pink' | 'teal' | 'green' | 'blue' | 'orange';
   r: number;
-  text: string;
+  /** One line, or a few short lines shown as a list. */
+  text: string | string[];
 }
 
 const PLANETS: Planet[] = [
   { key: 'leave', group: 'guard', deg: 200, label: 'LEAVING DELETES', kind: 'pink', r: 13, text: 'No ThreadMap tab open for 30 minutes: it unlinks your phone and deletes your chats, maps and photos. Keep a tab open to keep capturing.' },
-  { key: 'opened', group: 'guard', deg: 290, label: 'ONLY WHAT YOU OPEN', kind: 'pink', r: 12, text: 'Only chats you open are stored and analysed. Others stay in memory for at most 5 minutes, then vanish.' },
-  { key: 'readonly', group: 'guard', deg: 20, label: 'READ-ONLY', kind: 'pink', r: 12, text: 'ThreadMap never sends messages or read receipts.' },
-  { key: 'encrypted', group: 'guard', deg: 110, label: 'ENCRYPTED', kind: 'pink', r: 13, text: 'Encrypted at rest and on every connection; your WhatsApp login keys are encrypted by ThreadMap itself.' },
+  { key: 'opened', group: 'guard', deg: 272, label: 'ONLY WHAT YOU OPEN', kind: 'pink', r: 12, text: 'Only chats you open are stored and analysed. Others stay in memory for at most 5 minutes, then vanish.' },
+  { key: 'readonly', group: 'guard', deg: 326, label: 'READ-ONLY', kind: 'pink', r: 12, text: 'ThreadMap never sends messages or read receipts.' },
+  {
+    key: 'encrypted',
+    group: 'guard',
+    deg: 128,
+    label: 'ENCRYPTED',
+    kind: 'pink',
+    r: 13,
+    text: [
+      'Phone → ThreadMap: WhatsApp’s own end-to-end encryption; only ThreadMap’s linked device can open the messages.',
+      'ThreadMap → Supabase: an encrypted connection with the database’s certificate checked; stored encrypted at rest; your WhatsApp login keys sealed with AES-256-GCM.',
+      'ThreadMap → NVIDIA Nemotron: HTTPS to Nebius Token Factory, only the text being analysed.',
+      'Message text is not encrypted again inside the database, so search keeps working.',
+    ],
+  },
+  {
+    key: 'errors',
+    group: 'guard',
+    deg: 24,
+    label: 'CLEAR ERRORS',
+    kind: 'pink',
+    r: 12,
+    text: 'ThreadMap relies on WhatsApp, Supabase and NVIDIA Nemotron. When one of them is down, slow or out of allowance, ThreadMap says which one instead of failing silently.',
+  },
   { key: 'whatsapp', group: 'built', deg: 245, label: 'WHATSAPP LINK', kind: 'teal', r: 15, text: 'A linked device, like WhatsApp Web, via Baileys: an unofficial library, so WhatsApp could restrict it.' },
   { key: 'supabase', group: 'built', deg: 335, label: 'SUPABASE', kind: 'teal', r: 15, text: 'PostgreSQL in Singapore holds your opened chats, maps and search.' },
   { key: 'nemotron', group: 'built', deg: 65, label: 'NVIDIA NEMOTRON', kind: 'green', r: 18, text: 'Nemotron Nano, Super and Super VL on Nebius Token Factory read your messages to build the map. Spending is capped per person.' },
@@ -98,16 +121,19 @@ export function OrbitScene() {
 
           {/* Legend: which orbit is which. */}
           <g className="os-legend">
+            {/* Every colour an orbit's planets use, so the legend covers them all. */}
             {(
               [
-                ['guard', 'pink', 'GUARDRAILS'],
-                ['built', 'teal', 'BUILT WITH'],
-                ['feature', 'orange', 'FEATURES'],
+                ['guard', ['pink'], 'GUARDRAILS'],
+                ['built', ['teal', 'green'], 'BUILT WITH'],
+                ['feature', ['orange', 'blue'], 'FEATURES'],
               ] as const
-            ).map(([g, k, t], i) => (
+            ).map(([g, kinds, t], i) => (
               <g key={g} transform={`translate(26 ${30 + i * 24})`}>
-                <circle r="6" fill={`url(#os-${k})`} />
-                <text x="14" y="5">
+                {kinds.map((k, j) => (
+                  <circle key={k} cx={j * 15} r="6" fill={`url(#os-${k})`} />
+                ))}
+                <text x={30} y="5">
                   {t}
                 </text>
               </g>
@@ -164,10 +190,18 @@ export function OrbitScene() {
             <div className="jkicker">
               {ORBITS[planet.group].label} · {planet.label}
             </div>
-            <p>{planet.text}</p>
+            {Array.isArray(planet.text) ? (
+              <ul>
+                {planet.text.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            ) : (
+              <p>{planet.text}</p>
+            )}
           </>
         ) : (
-          <p className="counts">Click a planet: pink are guardrails, teal and green what ThreadMap is built with, blue and orange its features.</p>
+          <p className="counts">Click a planet: pink are guardrails, teal and green what ThreadMap is built with (green: NVIDIA), orange and blue its features.</p>
         )}
       </div>
     </section>

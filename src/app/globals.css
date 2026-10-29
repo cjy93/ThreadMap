@@ -621,7 +621,9 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 
 .coverage { max-width: 720px; margin: 10px auto; }
 .coverage summary { cursor: pointer; color: var(--text-2); }
-.connect-foot { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 18px; }
+.connect-page { position: relative; }
+.connect-home { position: absolute; top: 4px; left: 8px; z-index: 2; }
+@media (max-width: 760px) { .connect-home { position: static; display: inline-block; margin-bottom: 6px; } }
 
 /* Phones: one column, the line on the left. */
 @media (max-width: 760px) {
@@ -690,6 +692,7 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .orbit { max-width: 980px; margin: 0 auto; }
 .orbit-card { max-width: 640px; margin: 10px auto 0; padding: 10px 18px; border-radius: 14px; background: var(--panel); border: 1px solid var(--border); border-left-width: 3px; animation: os-card 0.35s ease; text-align: left; }
 .orbit-card p { margin: 4px 0 2px; font-size: 15px; color: var(--text-2); }
+.orbit-card ul { margin: 6px 0 2px; padding-left: 18px; font-size: 14px; line-height: 1.6; color: var(--text-2); }
 .orbit-card.card-hint { text-align: center; border-left-width: 1px; }
 .orbit-card.card-pink { border-left-color: var(--italic); }
 .orbit-card.card-blue { border-left-color: var(--knowledge); }
