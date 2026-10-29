@@ -44,7 +44,7 @@ interface Planet {
 
 const PLANETS: Planet[] = [
   { key: 'leave', group: 'guard', deg: 200, label: 'LEAVING DELETES', kind: 'pink', r: 13, text: 'No ThreadMap tab open for 30 minutes: it unlinks your phone and deletes your chats, maps and photos. Keep a tab open to keep capturing.' },
-  { key: 'opened', group: 'guard', deg: 272, label: 'ONLY WHAT YOU OPEN', kind: 'pink', r: 12, text: 'Only chats you open are stored and analysed. Others stay in memory for at most 5 minutes, then vanish.' },
+  { key: 'opened', group: 'guard', deg: 272, label: 'ONLY WHAT YOU OPEN', kind: 'pink', r: 12, text: 'Only chats you open are saved and analysed. WhatsApp sends every chat to a linked device; for chats you have not opened, ThreadMap holds them in memory only (at most 5 minutes, in case you open one), then drops them. They are never saved.' },
   { key: 'readonly', group: 'guard', deg: 326, label: 'READ-ONLY', kind: 'pink', r: 12, text: 'ThreadMap never sends messages or read receipts.' },
   {
     key: 'encrypted',
