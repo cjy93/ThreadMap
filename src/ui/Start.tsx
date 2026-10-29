@@ -5,11 +5,11 @@ export function Start({ pairingEnabled, demoEnabled, signedIn }: { pairingEnable
   return (
     <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
       {signedIn ? (
-        // Came here via "Home" while signed in: offer the way back rather than a new link.
+        // Signed in on this browser: offer the way back to your chats rather than a new link.
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Welcome back</h2>
           <p>You are signed in to ThreadMap on this browser. Continue to your chats and maps, or finish connecting WhatsApp.</p>
-          <a href="/app">
+          <a href="/api/view?to=mine">
             <button className="primary">Open ThreadMap</button>
           </a>
         </div>
@@ -29,12 +29,15 @@ export function Start({ pairingEnabled, demoEnabled, signedIn }: { pairingEnable
           )}
         </div>
       )}
-      {/* The demo needs its own guest session, so it is offered only when signed out. */}
-      {demoEnabled && !signedIn ? (
+      {/* Signed in, the demo opens as a separate view: your account and chats stay as they are. */}
+      {demoEnabled ? (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Try the demo</h2>
-          <p>An isolated workspace with three synthetic chats (300 messages, replayed and labeled as such). No WhatsApp pairing, no private data.</p>
-          <a href="/demo">
+          <p>
+            An isolated workspace with three synthetic chats (300 messages, replayed and labeled as such). No WhatsApp pairing, no private data.
+            {signedIn ? ' Your own chats stay linked: press “My chats” to go back.' : ''}
+          </p>
+          <a href={signedIn ? '/api/view?to=demo' : '/demo'}>
             <button className="primary">Open demo</button>
           </a>
         </div>

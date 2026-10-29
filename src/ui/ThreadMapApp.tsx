@@ -56,7 +56,7 @@ interface StarredMessage {
 type StarredState = { scope: 'chat' | 'all'; items: StarredMessage[] | null };
 type AnswerState = { state: 'loading'; note?: string } | { state: 'done'; answer: AskAnswer } | { state: 'none'; note: string };
 
-export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
+export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | 'demo'; ownAccount?: boolean }) {
   const initial = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [chatId, setChatId] = useState<string | null>(initial.get('chat'));
@@ -490,7 +490,12 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
           </span>
           <span style={{ display: 'flex', gap: 4 }}>
             <ThemeToggle />
-            <button onClick={() => (mode === 'private' ? void leaveAndDeleteAccount() : void authClient.signOut().then(() => router.push('/')))}>Sign out</button>
+            {mode === 'demo' && ownAccount ? (
+              // Viewing the demo from a WhatsApp account: leave the demo, keep the account.
+              <button onClick={() => window.location.assign('/api/view?to=mine')}>My chats</button>
+            ) : (
+              <button onClick={() => (mode === 'private' ? void leaveAndDeleteAccount() : void authClient.signOut().then(() => router.push('/')))}>Sign out</button>
+            )}
           </span>
         </div>
         {mode === 'demo' ? <p className="banner">Demo: labeled synthetic replay. Pairing disabled.</p> : null}

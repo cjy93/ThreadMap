@@ -72,9 +72,10 @@ export async function requireUser(req: Request, opts: { mutation?: boolean } = {
   if (!session) throw new SafeError('sign in required', 401, 'unauthenticated');
   const db = getDb();
   const u = session.user as { id: string; isAnonymous?: boolean | null };
-  const mode = await workspaceModeFor(db, u);
+  const mode = await workspaceModeFor(db, u, viewsDemo(req.headers.get('cookie')));
   const [ws] = await db.select().from(schema.workspaces).where(and(eq(schema.workspaces.ownerUserId, u.id), eq(schema.workspaces.mode, mode)));
-  if (!ws) {
+  // A WhatsApp account viewing the demo gets a fresh one once its demo has expired.
+  if (!ws || (mode === 'demo' && !u.isAnonymous && ws.expiresAt && ws.expiresAt < new Date())) {
     if (mode === 'demo') {
       if (!loadAppConfig().PUBLIC_DEMO_ENABLED) throw new SafeError('the public demo is disabled on this deployment', 403, 'demo_disabled');
       const { ensureDemoWorkspace } = await import('./demo');
@@ -93,10 +94,19 @@ export async function requireUser(req: Request, opts: { mutation?: boolean } = {
  * A session with a private workspace (pending or claimed through WhatsApp) is
  * private even while still anonymous; other anonymous sessions are demo guests.
  */
-export async function workspaceModeFor(db: Db, u: { id: string; isAnonymous?: boolean | null }): Promise<'private' | 'demo'> {
+export async function workspaceModeFor(db: Db, u: { id: string; isAnonymous?: boolean | null }, demoView = false): Promise<'private' | 'demo'> {
+  if (demoView && !u.isAnonymous && loadAppConfig().PUBLIC_DEMO_ENABLED) return 'demo';
   const [priv] = await db.select({ id: schema.workspaces.id }).from(schema.workspaces).where(and(eq(schema.workspaces.ownerUserId, u.id), eq(schema.workspaces.mode, 'private')));
   return priv || !u.isAnonymous ? 'private' : 'demo';
 }
+
+/**
+ * A signed-in WhatsApp account can open the demo without signing out (signing
+ * out deletes its data): this cookie switches the view, and "Back to my chats"
+ * clears it. The account and its chats are untouched.
+ */
+export const DEMO_VIEW_COOKIE = 'tm_view';
+export const viewsDemo = (cookieHeader: string | null | undefined) => /(?:^|;\s*)tm_view=demo(?:;|$)/.test(cookieHeader ?? '');
 
 export function requireOwner(ctx: AuthCtx) {
   if (ctx.mode !== 'private') throw new SafeError('not available in the public demo', 403, 'demo_forbidden');

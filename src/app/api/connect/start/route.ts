@@ -1,4 +1,4 @@
-import { getAuth, getOrigin } from '@/server/auth';
+import { DEMO_VIEW_COOKIE, getAuth, getOrigin } from '@/server/auth';
 import { startPairing } from '@/server/api/connector';
 import { getDb } from '@/server/db';
 import { errorResponse, json } from '@/server/http';
@@ -20,7 +20,10 @@ export async function POST(req: Request) {
     const db = getDb();
     const ws = await startWhatsAppLogin(db, { id: u.id, isAnonymous: Boolean(u.isAnonymous) });
     await startPairing(db, { userId: u.id, workspaceId: ws.id, mode: 'private' });
-    return json({ ok: true });
+    // A new link opens your own chats, not a demo viewed earlier in this browser.
+    const res = json({ ok: true });
+    res.headers.append('set-cookie', `${DEMO_VIEW_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
+    return res;
   } catch (e) {
     return errorResponse(e);
   }

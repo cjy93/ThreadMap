@@ -16,9 +16,10 @@ export const autoDeleteMinutes = () => {
   return Number.isFinite(v) && v >= 0 ? v : 30;
 };
 
-/** An open page of a private account checked in. */
-export async function markSeen(db: Db, workspaceId: string) {
-  await db.update(s.workspaces).set({ lastSeenAt: new Date() }).where(and(eq(s.workspaces.id, workspaceId), eq(s.workspaces.mode, 'private')));
+/** An open page of a private account checked in; viewing the demo (by owner) counts too. */
+export async function markSeen(db: Db, workspaceId: string, ownerUserId?: string) {
+  const which = ownerUserId ? eq(s.workspaces.ownerUserId, ownerUserId) : eq(s.workspaces.id, workspaceId);
+  await db.update(s.workspaces).set({ lastSeenAt: new Date() }).where(and(which, eq(s.workspaces.mode, 'private')));
   return { ok: true, delete_after_minutes: autoDeleteMinutes() };
 }
 

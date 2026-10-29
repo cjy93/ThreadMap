@@ -10,7 +10,8 @@ const DEMO_TTL_MS = 24 * 60 * 60 * 1000;
 
 export async function ensureDemoWorkspace(db: Db, userId: string) {
   const [existing] = await db.select().from(s.workspaces).where(and(eq(s.workspaces.ownerUserId, userId), eq(s.workspaces.mode, 'demo')));
-  if (existing) return existing;
+  if (existing && !(existing.expiresAt && existing.expiresAt < new Date())) return existing;
+  if (existing) await db.delete(s.workspaces).where(eq(s.workspaces.id, existing.id));
   const [ws] = await db
     .insert(s.workspaces)
     .values({ ownerUserId: userId, mode: 'demo', name: 'ThreadMap demo (synthetic replay)', expiresAt: new Date(Date.now() + DEMO_TTL_MS) })
@@ -30,6 +31,8 @@ export async function purgeExpiredDemos(db: Db) {
   const expired = await db.select().from(s.workspaces).where(lt(s.workspaces.expiresAt, new Date()));
   for (const w of expired) {
     await db.execute(sql`DELETE FROM "user" WHERE id = ${w.ownerUserId} AND is_anonymous`);
+    // A WhatsApp account's demo view: drop the demo, keep the account.
+    if (w.mode === 'demo') await db.delete(s.workspaces).where(eq(s.workspaces.id, w.id));
   }
   return expired.length;
 }
