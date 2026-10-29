@@ -589,8 +589,9 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .jstep-left .jactions, .jstep-left .phone-link { justify-content: flex-end; }
 .jactions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .jstep-left .jactions { justify-content: flex-end; }
-/* The chat list scrolls in its own box (filters pinned on top), so step 3 follows right after it. */
-.jwide { grid-column: 1 / -1; grid-row: 2; margin-top: 12px; padding: 0 14px 10px; border-radius: 16px; background: var(--panel); border: 1px solid var(--border); position: relative; z-index: 1; max-height: min(52vh, 440px); overflow: auto; overscroll-behavior: contain; }
+/* The chat list scrolls in its own box (filters pinned on top), so step 3 follows right after it;
+   its panel tint sits on a solid backing so the timeline line stays behind the chats. */
+.jwide { grid-column: 1 / -1; grid-row: 2; margin-top: 12px; padding: 0 14px 10px; border-radius: 16px; background: linear-gradient(var(--panel), var(--panel)), var(--surface); border: 1px solid var(--border); position: relative; z-index: 1; max-height: min(52vh, 440px); overflow: auto; overscroll-behavior: contain; }
 .jwide table th, .jwide table td { padding: 6px 4px; border-bottom: 1px solid var(--border); }
 
 /* The live QR, framed like a screen with glowing corners; it stays black on white to scan. */
