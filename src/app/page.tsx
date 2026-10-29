@@ -1,5 +1,4 @@
 import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
 import { loadAppConfig } from '@/lib/config';
 import { getAuth } from '@/server/auth';
 import { RootIcon } from '@/ui/RootIcon';
@@ -23,7 +22,7 @@ function LandingTop() {
   );
 }
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ home?: string }> }) {
+export default async function Home() {
   const auth = await getAuth();
   if (!auth) {
     return (
@@ -36,9 +35,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ h
     );
   }
   const session = await auth.api.getSession({ headers: await headers() });
-  // Signed-in visitors go straight to the app, unless they chose "Home" (signing out would delete their data).
-  const wantsHome = (await searchParams).home === '1';
-  if (session && !wantsHome) redirect('/app');
+  // The landing page is always the front door; signed-in visitors get "Welcome back" with the
+  // way into their chats (and the demo), never a forced jump to the app.
   const cfg = loadAppConfig();
   return (
     <main className="landing">

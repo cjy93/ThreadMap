@@ -239,7 +239,7 @@ export function ConnectPanel({
   return (
     <div className="connect-page">
       {/* Home without signing out: signing out deletes this account's data. */}
-      <a className="connect-home" href="/?home=1">
+      <a className="connect-home" href="/">
         <button>← Home page</button>
       </a>
       <header className="connect-hero">
