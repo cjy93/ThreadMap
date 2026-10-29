@@ -117,6 +117,29 @@ export const SplitSchema = z.object({
 /** Filler screening: refs of messages that add nothing on their own. */
 export const FillerSchema = z.object({ filler: z.array(ref).max(400).default([]) });
 
+/** Concept map, step 1: the subject, the questions asked and how they were answered, and what to look up on the web. */
+export const StudyPlanSchema = z.object({
+  subject: z.string().min(1).max(160),
+  questions: z
+    .array(z.object({ question: z.string().min(1).max(300), asked_in: z.array(z.string()).max(4).default([]), answered_in: z.array(z.string()).max(8).default([]) }))
+    .max(12)
+    .default([]),
+  searches: z.array(z.object({ query: z.string().min(1).max(200), why: z.string().max(200).default('') })).max(6).default([]),
+});
+
+/** Concept map, step 2: linked concepts, a study guide and what is still open. Refs are m… (messages) or w… (web pages). */
+export const StudyMapSchema = z.object({
+  title: z.string().min(1).max(120),
+  summary: z.string().max(1200).default(''),
+  concepts: z
+    .array(z.object({ key: z.string().min(1).max(16), label: z.string().min(1).max(90), kind: z.string().max(20).default('concept'), explanation: z.string().max(1200).default(''), refs: z.array(z.string()).max(10).default([]) }))
+    .min(1)
+    .max(30),
+  relations: z.array(z.object({ from: z.string().min(1).max(16), to: z.string().min(1).max(16), label: z.string().max(60).default('') })).max(60).default([]),
+  guide: z.array(z.object({ heading: z.string().min(1).max(120), text: z.string().max(2000), refs: z.array(z.string()).max(10).default([]) })).max(10).default([]),
+  gaps: z.array(z.string().max(300)).max(8).default([]),
+});
+
 /** JSON Schemas (subset) for providers that support schema-constrained output. */
 export const JSON_SCHEMAS: Record<string, Record<string, unknown>> = {
   extraction: z.toJSONSchema(ExtractionSchema) as Record<string, unknown>,
@@ -133,4 +156,6 @@ export const JSON_SCHEMAS: Record<string, Record<string, unknown>> = {
   alias: z.toJSONSchema(AliasSchema) as Record<string, unknown>,
   answers: z.toJSONSchema(AnswersSchema) as Record<string, unknown>,
   roots: z.toJSONSchema(RootReviewSchema) as Record<string, unknown>,
+  study_plan: z.toJSONSchema(StudyPlanSchema) as Record<string, unknown>,
+  study_map: z.toJSONSchema(StudyMapSchema) as Record<string, unknown>,
 };

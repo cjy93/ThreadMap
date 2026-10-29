@@ -99,6 +99,13 @@
       "when": 1793172672613,
       "tag": "0013_last_seen",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1793244220547,
+      "tag": "0014_study_maps",
+      "breakpoints": true
     }
   ]
 }

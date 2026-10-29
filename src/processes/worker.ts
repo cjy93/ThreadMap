@@ -17,6 +17,8 @@ import { getStorage } from '../server/storage';
 import { BudgetExceededError } from '../server/ai/router';
 import { inferAnswers } from '../server/api/answers';
 import { answerQuestion, interpretRequest } from '../server/api/ask';
+import { buildStudyMap } from '../server/api/studymap';
+import { tavilySearch } from '../server/ai/websearch';
 import { ASK_CHANNEL, ASK_REPLY_CHANNEL } from '../server/notify';
 import pg from 'pg';
 
@@ -45,6 +47,9 @@ async function main() {
   await boss.start();
   await boss.createQueue(QUEUE, { retryLimit: 2, retryBackoff: true, retryDelay: 10 }).catch(() => undefined);
   const deps = provider ? ({ db, provider, cfg } satisfies PipelineDeps) : null;
+  // Concept maps search the web only when a Tavily key is set.
+  const webSearch = cfg.TAVILY_API_KEY ? tavilySearch(cfg.TAVILY_API_KEY) : null;
+  log('web_search', { enabled: Boolean(webSearch) });
 
   // Ask: the web process sends questions here because only this process holds the model key.
   if (deps) {
@@ -52,7 +57,9 @@ async function main() {
       void (async () => {
         let id = '';
         try {
-          const req = JSON.parse(n.payload ?? '{}') as { id: string; kind?: 'answer' | 'answers'; workspaceId: string; chatIds: string[]; question: string; messageIds?: string[]; messageId?: string };
+          const req = JSON.parse(n.payload ?? '{}') as { id: string; kind?: 'answer' | 'answers' | 'study'; workspaceId: string; chatIds: string[]; question: string; messageIds?: string[]; messageId?: string; studyMapId?: string };
+          // A concept map saves its own result; the page reads it from there.
+          if (req.kind === 'study') return void (await buildStudyMap(deps, req.studyMapId ?? '', webSearch));
           id = req.id;
           const r =
             req.kind === 'answer'
@@ -130,6 +137,9 @@ async function main() {
         WHERE status = 'budget_paused' AND (safe_error LIKE '%(user)%' OR safe_error LIKE '%(day)%')
           AND completed_at < now() - interval '5 minutes'`);
       if (retried.rowCount) log('budget_paused_retried', { count: retried.rowCount });
+      // Concept maps requested while this worker was down (their notification was missed).
+      const waitingMaps = await db.execute<{ id: string }>(sql`SELECT id FROM study_maps WHERE status = 'pending' AND created_at < now() - interval '20 seconds' LIMIT 2`);
+      for (const m of waitingMaps.rows) void buildStudyMap(deps, m.id, webSearch);
     } catch (e) {
       log('tick_failed', { error: e instanceof Error ? e.name : 'unknown' });
     } finally {

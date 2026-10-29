@@ -388,7 +388,7 @@ export async function getMessage(db: Db, ctx: AuthCtx, messageId: string) {
     content_revision: m.contentRevision,
     review: isRead ? 'read' : 'missed',
     reviewable: !tombstoned && (m.kind === 'text' || m.kind === 'media'),
-    topic_paths: placements.filter((p) => tree.nodes.has(p.topicId)).map((p) => ({ primary: p.isPrimary, path: pathOf(tree, p.topicId) })),
+    topic_paths: placements.filter((p) => tree.nodes.has(p.topicId)).map((p) => ({ primary: p.isPrimary, root: tree.nodes.get(p.topicId)!.root, path: pathOf(tree, p.topicId) })),
     attachments: tombstoned
       ? []
       : atts.map((a) => ({

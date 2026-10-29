@@ -2,6 +2,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AskMap, type AskResult } from './AskMap';
+import { StudyMapView } from './StudyMap';
 import { Avatar } from './Avatar';
 import { BuildProgress } from './BuildProgress';
 import { api, authClient, filterParams, leaveAndDeleteAccount, openOnDoubleClick, qs, sourceNumbers, type FilterState } from './client';
@@ -139,6 +140,8 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
   const [msgTrail, setMsgTrail] = useState<string[]>([]);
   // After an Ask the canvas shows its concept map until "Back to mind map".
   const [conceptMap, setConceptMap] = useState(false);
+  // The message whose concept map (study guide) fills the canvas, until "Back to mind map".
+  const [studyFor, setStudyFor] = useState<string | null>(null);
   const gen = useRef(0);
   const router = useRouter();
 
@@ -430,6 +433,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                 setSearchRes(null);
                 setAnswer(null);
                 setConceptMap(false);
+                setStudyFor(null);
                 setStarred(null);
                 setMsgTrail([]);
                 setHeadFolded(false);
@@ -718,7 +722,9 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
             ))}
           </div>
         ) : null}
-        {searchRes && conceptMap ? (
+        {studyFor ? (
+          <StudyMapView key={studyFor} messageId={studyFor} onBack={() => setStudyFor(null)} onOpenMessage={onOpenMessage} />
+        ) : searchRes && conceptMap ? (
           <AskMap
             res={searchRes}
             onBack={() => setConceptMap(false)}
@@ -788,6 +794,7 @@ export function ThreadMapApp({ mode }: { mode: 'private' | 'demo' }) {
                   void loadChats();
                 }}
                 onOpenMessage={onOpenMessage}
+                onConceptMap={setStudyFor}
               />
             </div>
           ) : starred ? (

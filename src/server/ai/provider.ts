@@ -27,6 +27,8 @@ export interface CompletionRequest {
   thinking?: boolean;
   /** Images sent with the user turn (vision role). */
   images?: { mime: string; b64: string }[];
+  /** Overrides LLM_HTTP_TIMEOUT_MS for one long call. */
+  timeoutMs?: number;
 }
 
 export interface CompletionResult {
@@ -158,7 +160,7 @@ export class NebiusModelProvider implements ModelProvider {
         ],
         // Nemotron chat-template switch; Token Factory honours it (reasoning output drops to 0).
         ...(thinkingOff ? { chat_template_kwargs: { enable_thinking: false } } : {}),
-      } as OpenAI.ChatCompletionCreateParamsNonStreaming);
+      } as OpenAI.ChatCompletionCreateParamsNonStreaming, req.timeoutMs ? { timeout: req.timeoutMs } : undefined);
       const choice = r.choices[0];
       const usage = r.usage as (OpenAI.CompletionUsage & { completion_tokens_details?: { reasoning_tokens?: number } }) | undefined;
       return {

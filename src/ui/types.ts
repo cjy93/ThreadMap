@@ -134,7 +134,8 @@ export interface SourceMessage {
   content_revision: number;
   review: 'read' | 'missed';
   reviewable: boolean;
-  topic_paths: { primary: boolean; path: PathItem[] }[];
+  /** root: the category the topic is under (concept maps are offered for KNOWLEDGE and RESOURCES). */
+  topic_paths: { primary: boolean; root?: string; path: PathItem[] }[];
   attachments: { id: string; media_type: string; mime: string | null; filename: string | null; size: number | null; availability: string; has_preview: boolean; description: string | null }[];
   context: { message_id: string; sender: string; direction: string; current: boolean; snippet: string | null; sent_at: string | null }[];
   /** Every message of the discussion this one belongs to, in order (null before it is analysed). */
@@ -162,3 +163,28 @@ export interface SourceMessage {
     after: ChainMessage[];
   };
 }
+
+/** A concept map (study guide) built from one message by Nemotron Ultra, with web sources. */
+export interface StudyMap {
+  title: string;
+  summary: string;
+  subject: string;
+  topic_path: string;
+  concepts: { key: string; label: string; kind: 'core' | 'concept' | 'detail' | 'example' | 'question'; explanation: string; messages: string[]; web: number[] }[];
+  relations: { from: string; to: string; label: string }[];
+  guide: { heading: string; text: string; messages: string[]; web: number[] }[];
+  gaps: string[];
+  web: { enabled: boolean; queries: string[]; results: { title: string; url: string }[]; note: string | null };
+  read: { messages: number; discussions: number };
+}
+export interface StudySource {
+  message_id: string;
+  chat_id: string;
+  sender: string;
+  snippet: string;
+  sent_at: string | null;
+}
+export type StudyMapState =
+  | { state: 'none' }
+  | { state: 'pending' | 'reading' | 'searching' | 'building' | 'failed'; id: string; note: string | null; started_at: string }
+  | { state: 'done'; id: string; built_at: string; map: StudyMap; sources: Record<string, StudySource> };

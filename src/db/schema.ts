@@ -940,3 +940,30 @@ export const auditLog = pgTable('audit_log', {
   detail: jsonb('detail').notNull().default({}),
   createdAt: createdAt(),
 });
+
+// Concept maps (study guides) built from one opened message: Nemotron Ultra reads
+// its discussion and topic branch up to the root, searches the web when needed,
+// and links the concepts. `result` cites messages by id and web pages by URL.
+export const studyMaps = pgTable(
+  'study_maps',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    chatId: uuid('chat_id')
+      .notNull()
+      .references(() => chats.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: ['pending', 'reading', 'searching', 'building', 'done', 'failed'] })
+      .notNull()
+      .default('pending'),
+    result: jsonb('result'),
+    safeError: text('safe_error'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('study_maps_message_idx').on(t.messageId, t.createdAt)],
+);

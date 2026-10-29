@@ -143,6 +143,8 @@ export interface ModelCall<T> {
   thinking?: boolean;
   /** Images for the vision role. */
   images?: { mime: string; b64: string }[];
+  /** Overrides the HTTP timeout for one long call. */
+  timeoutMs?: number;
 }
 
 export interface ModelCallResult<T> {
@@ -175,7 +177,7 @@ export async function callModel<T>(deps: RouterDeps, scope: CallScope, call: Mod
     calls++;
     deps.onCall?.(role, operation);
     try {
-      const r = await provider.complete({ role, operation, system, user, maxOutputTokens: maxOut, schemaName: call.schemaName, jsonSchema: call.jsonSchema, fixtureHints: call.hints, thinking, images: call.images });
+      const r = await provider.complete({ role, operation, system, user, maxOutputTokens: maxOut, schemaName: call.schemaName, jsonSchema: call.jsonSchema, fixtureHints: call.hints, thinking, images: call.images, timeoutMs: call.timeoutMs });
       const actual = p && r.usage.input !== null && r.usage.output !== null ? usdMicros((r.usage.input * p.input + r.usage.output * p.output) / 1_000_000) : est;
       await settle(db, scope.logicalJobId, who, day, est, actual, { input: r.usage.input ?? 0, output: r.usage.output ?? 0 });
       return { r, started, actual, modelId };

@@ -86,7 +86,9 @@ export function BuildProgress({ chatKey, total, pending, jobs, failed, budgetPau
         <div className="bp-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label="Messages placed on the map">
           <span style={{ width: `${pending === 0 ? 100 : pct}%` }} className={pending === 0 ? 'busy' : undefined} />
         </div>
-        <div className="bp-sub">Nemotron first reads every message in batches, then lays out the topics, so the bar can stay still for a while before jumping.</div>
+        <div className="bp-sub">
+          The first build is the slowest: Nemotron reads every message in batches, then lays out the topics, so the bar can stay still for a while before jumping. After that, Refresh only places new messages, and Rebuild map reuses what was already read.
+        </div>
       </div>
     );
   }

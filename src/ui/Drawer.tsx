@@ -165,7 +165,26 @@ function ChainItem({ c, tz, onOpen }: { c: ChainMessage; tz: string; onOpen: () 
 }
 
 /** Exact source with revision-aware two-second foreground dwell. */
-export function SourceView({ messageId, tz, dwellMs, suppressed, onSuppress, onChanged, onOpenMessage }: { messageId: string; tz: string; dwellMs: number; suppressed: boolean; onSuppress: (id: string) => void; onChanged: () => void; onOpenMessage: (chatId: string, id: string) => void }) {
+export function SourceView({
+  messageId,
+  tz,
+  dwellMs,
+  suppressed,
+  onSuppress,
+  onChanged,
+  onOpenMessage,
+  onConceptMap,
+}: {
+  messageId: string;
+  tz: string;
+  dwellMs: number;
+  suppressed: boolean;
+  onSuppress: (id: string) => void;
+  onChanged: () => void;
+  onOpenMessage: (chatId: string, id: string) => void;
+  /** Open this message's concept map (offered for Knowledge and Resources messages). */
+  onConceptMap?: (id: string) => void;
+}) {
   const [m, setM] = useState<SourceMessage | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [fileState, setFileState] = useState<Record<string, string>>({});
@@ -274,6 +293,17 @@ export function SourceView({ messageId, tz, dwellMs, suppressed, onSuppress, onC
         {m.edited_at ? <span className="pill" style={{ marginLeft: 6 }}>edited · revision {m.content_revision}</span> : null}
       </p>
       {m.marker ? <p className="pill">{m.marker}</p> : m.body ? <div className="src">{m.body}</div> : null}
+      {onConceptMap && m.state === 'active' && m.topic_paths.some((p) => p.root === 'KNOWLEDGE' || p.root === 'RESOURCES') ? (
+        <p>
+          <button
+            className="primary"
+            onClick={() => onConceptMap(m.message_id)}
+            title="NVIDIA Nemotron Ultra reads this message's discussion, the questions and answers around it and its whole topic branch up to the root, searches the web for documentation, and builds a concept map with a study guide"
+          >
+            🧭 Concept map
+          </button>
+        </p>
+      ) : null}
       {m.attachments.map((a) => (
         <div key={a.id} className="msg">
           <MediaView a={a} onFetch={fetchFile} />
