@@ -192,16 +192,28 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
   const [headFolded, setHeadFolded] = useState(false);
   // Messages opened one from another (e.g. within a discussion); Back walks this trail.
   const [msgTrail, setMsgTrail] = useState<string[]>([]);
-  // After an Ask the canvas shows its concept map until "Back to mind map".
+  // After an Ask the canvas shows its query map until "Back to mind map".
   const [conceptMap, setConceptMap] = useState(false);
   // The message whose concept map (study guide) fills the canvas, until "Back to mind map".
   const [studyFor, setStudyFor] = useState<string | null>(null);
   // On a concept map the Source panel starts hidden, so the concept card takes its place;
   // "Show source message" (or ✕ to hide again) toggles it while that map is open.
   const [sourceHidden, setSourceHidden] = useState(true);
+  // Where the details panel was when the concept map opened: "Back to mind map" returns there.
+  const studyReturn = useRef<{ chatId: string | null; messageId: string | null; msgTrail: string[] } | null>(null);
   const openStudy = (id: string) => {
+    studyReturn.current = { chatId, messageId, msgTrail };
     setStudyFor(id);
     setSourceHidden(true);
+  };
+  const closeStudy = () => {
+    const r = studyReturn.current;
+    studyReturn.current = null;
+    setStudyFor(null);
+    if (!r) return;
+    if (r.chatId) setChatId(r.chatId);
+    setMessageId(r.messageId);
+    setMsgTrail(r.msgTrail);
   };
   const studySourceShown = Boolean(studyFor) && !sourceHidden;
   const gen = useRef(0);
@@ -337,6 +349,8 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
     setMessageId(id);
     // Opening a message (e.g. a concept's source) shows the Source panel, also on a concept map.
     setSourceHidden(false);
+    // On a narrow screen the panel sits below the map: bring it into view.
+    requestAnimationFrame(() => document.querySelector('.drawer')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
     setSuppressed((s) => {
       if (!s.has(id)) return s;
       const n = new Set(s);
@@ -373,6 +387,9 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
     setChipRes(null);
     setStarred(null);
     setSmallTalk(null);
+    // A new question shows its results: close any message opened from the last one.
+    setMessageId(null);
+    setMsgTrail([]);
     setAsking(query);
     setAnswer(null);
     let res: SearchResult;
@@ -423,8 +440,9 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
   const shownResults = listRes?.results ?? [];
   // A page of matches with the given words (no new model call); topics only for the full list.
   const fetchPage = useCallback(
-    (terms: string[], topics: string[], offset: number) =>
-      api<SearchResult>(`/api/ask?${qs({ ...askParamsRef.current, terms_json: JSON.stringify(terms), topics: topics.join(','), offset: String(offset) })}`),
+    // only: words picked from the list (results grouped by those words, not the question).
+    (terms: string[], topics: string[], offset: number, only = false) =>
+      api<SearchResult>(`/api/ask?${qs({ ...askParamsRef.current, terms_json: JSON.stringify(terms), topics: topics.join(','), offset: String(offset), only: only ? '1' : undefined })}`),
     [],
   );
   const toggleChip = async (term: string) => {
@@ -435,7 +453,7 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
     const mine = ++chipGen.current;
     if (!next.length) return;
     const my = askGen.current;
-    const r = await fetchPage(next, [], 0).catch(() => null);
+    const r = await fetchPage(next, [], 0, true).catch(() => null);
     // Only if the question and the picked chips are still the same.
     if (r && my === askGen.current && mine === chipGen.current) setChipRes(r);
   };
@@ -446,7 +464,7 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
     const my = askGen.current;
     setLoadingMore(true);
     try {
-      const more = await fetchPage(filtering ? chipSel : searchRes.terms, filtering ? [] : searchRes.topics.map((t) => t.topic_id), nextOffset);
+      const more = await fetchPage(filtering ? chipSel : searchRes.terms, filtering ? [] : searchRes.topics.map((t) => t.topic_id), nextOffset, filtering);
       if (my !== askGen.current) return;
       const add = (cur: SearchResult | null) => {
         if (!cur) return cur;
@@ -485,8 +503,23 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
   // The shown map's analysis: the chat's own, or the one-sided map's.
   const analysis = map?.analysis ?? chat?.analysis;
   // Starred: messages starred in WhatsApp, for this chat or every opened chat.
+  // What was showing before Small talk opened, so closing it goes back there.
+  const beforeSmallTalk = useRef<{ chatId: string; selectedNode: string | null; messageId: string | null; msgTrail: string[]; searchRes: SearchResult | null; starred: StarredState | null; headFolded: boolean } | null>(null);
+  const closeSmallTalk = () => {
+    const b = beforeSmallTalk.current;
+    beforeSmallTalk.current = null;
+    setSmallTalk(null);
+    if (!b || b.chatId !== chatId) return;
+    setSelectedNode(b.selectedNode);
+    setMessageId(b.messageId);
+    setMsgTrail(b.msgTrail);
+    setSearchRes(b.searchRes);
+    setStarred(b.starred);
+    setHeadFolded(b.headFolded);
+  };
   const openSmallTalk = async (cid: string, offset = 0) => {
     if (!offset) {
+      if (!smallTalk) beforeSmallTalk.current = { chatId: cid, selectedNode, messageId, msgTrail, searchRes, starred, headFolded };
       setSelectedNode(null);
       setMessageId(null);
       setSearchRes(null);
@@ -760,7 +793,7 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
         </button>
         {/* The controls belong to the mind map; on the Ask map the way back to it takes their place. */}
         {searchRes && conceptMap ? (
-          <button className="fold-btn" title="Leave the Ask map for this chat's mind map (its controls come back)" onClick={() => {
+          <button className="fold-btn" title="Leave the query map for this chat's mind map (its controls come back)" onClick={() => {
             setConceptMap(false);
             setHeadFolded(false);
           }}>
@@ -790,7 +823,7 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
                 className="status-link"
                 aria-pressed={smallTalk !== null}
                 title="Messages that add nothing on their own (“ok”, “lol”, throwaway quips) are not counted or listed on the map, so its counts add up to less than the chat's. Click to list them and check nothing important was left out."
-                onClick={() => (smallTalk ? setSmallTalk(null) : chatId ? void openSmallTalk(chatId) : undefined)}
+                onClick={() => (smallTalk ? closeSmallTalk() : chatId ? void openSmallTalk(chatId) : undefined)}
               >
                 {map.chat_totals.filler_count} small-talk messages left off the map · {smallTalk ? 'hide' : 'show them'}
               </button>
@@ -863,7 +896,8 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
             );
           })()
         ) : null}
-        {map && chat && chatId ? (
+        {/* About the mind map: hidden while a concept map fills the canvas (it covered the map's buttons). */}
+        {map && chat && chatId && !studyFor ? (
           <BuildProgress
             chatKey={chatId}
             total={map.chat_totals.message_count}
@@ -896,7 +930,7 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
           <StudyMapView
             key={studyFor}
             messageId={studyFor}
-            onBack={() => setStudyFor(null)}
+            onBack={closeStudy}
             onOpenMessage={onOpenMessage}
             sourceShown={studySourceShown}
             onToggleSource={() => {
@@ -953,6 +987,8 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
                     setSourceHidden(true);
                     return;
                   }
+                  // Small talk goes back to where you were before opening it.
+                  if (smallTalk) return closeSmallTalk();
                   setMessageId(null);
                   setMsgTrail([]);
                   setSelectedNode(null);
@@ -1059,7 +1095,7 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
                     setHeadFolded(true);
                   }}
                 >
-                  ◇ Show concept map →
+                  🔍 Show query map →
                 </button>
               ) : null}
               <div className="bubble ai-read">
@@ -1169,7 +1205,9 @@ export function ThreadMapApp({ mode, ownAccount = false }: { mode: 'private' | '
               {shownResults.map((r, i) => (
                 <div key={r.message_id}>
                 {r.match && r.match !== shownResults[i - 1]?.match ? (
-                  <div className="ask-tier">{{ exact: 'Exact match', partial: `Contains “${searchRes.query.trim()}” inside a word`, meaning: 'Related by meaning' }[r.match]}</div>
+                  <div className="ask-tier">{filtering
+                      ? { exact: `With “${chipSel.join('”, “')}”`, partial: `With “${chipSel.join('”, “')}” inside a word`, meaning: 'Similar spelling, or in a photo or file description' }[r.match]
+                      : { exact: 'Exact match', partial: `Contains “${searchRes.query.trim()}” inside a word`, meaning: 'Related by meaning' }[r.match]}</div>
                 ) : null}
                 <div className="msg ask-hit" {...openOnDoubleClick(() => onOpenMessage(r.chat_id, r.message_id))}>
                   {r.context?.before ? (

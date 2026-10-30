@@ -89,7 +89,7 @@ const PLANETS: Planet[] = [
   { key: 'brev', group: 'built', deg: 155, label: 'NVIDIA BREV', kind: 'green', r: 14, text: 'Runs ThreadMap in the cloud: web app, WhatsApp link and analysis worker in one container.' },
   { key: 'map', group: 'feature', deg: 215, label: 'MIND MAP', kind: 'orange', r: 20, text: 'Four roots with nested topics; every node opens its exact source messages and files.' },
   { key: 'ask', group: 'feature', deg: 305, label: 'ASK', kind: 'blue', r: 17, text: 'Exact words first, then partial words, then meaning — with an answer that cites its messages.' },
-  { key: 'concept', group: 'feature', deg: 35, label: 'CONCEPT MAP', kind: 'blue', r: 16, text: 'Turns a Knowledge or Resources message into a concept map and study guide.' },
+  { key: 'concept', group: 'feature', deg: 35, label: 'CONCEPT MAP', kind: 'blue', r: 16, text: 'Turns any message on the map into a concept map and study guide.' },
   { key: 'review', group: 'feature', deg: 125, label: 'READ & MISSED', kind: 'orange', r: 15, text: 'Tracks what you have read; small talk stays off the map but can be listed.' },
 ];
 

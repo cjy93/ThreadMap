@@ -3,7 +3,7 @@
 // every message of its topic branch from the opened topic back up to the root
 // category, from everyone in the chat; then searches the web for documentation
 // when the chat does not explain enough (Tavily), and links the concepts into a
-// map with a study guide. Only Knowledge and Resources messages have one.
+// map with a study guide. Any message on the map has one, under every root.
 // The build runs in the worker (which holds the keys) and is saved, so it is
 // built once and reopened instantly.
 import crypto from 'node:crypto';
@@ -16,14 +16,11 @@ import { BudgetExceededError, callModel, ensureLedger, estimateTokens } from '..
 import { JSON_SCHEMAS, StudyMapSchema, StudyPlanSchema } from '../ai/schemas';
 import { cleanQuery, type WebResult, type WebSearch } from '../ai/websearch';
 import type { Db } from '../db';
-import { ancestors, descendantIds, loadTree, type RootEnum } from '../graph/tree';
+import { ancestors, descendantIds, loadTree } from '../graph/tree';
 import { ASK_CHANNEL } from '../notify';
 import { isUuid, SafeError } from '../util';
 import { modelProblem } from './ask';
 import { discussionRows, requireChat, type AuthCtx } from './service';
-
-/** Roots whose messages have a concept map: study material, not chat or plans. */
-export const STUDY_ROOTS: readonly RootEnum[] = ['KNOWLEDGE', 'RESOURCES'];
 
 // What Ultra reads: at most this many messages, each cut to this length.
 const MAX_MESSAGES = 220;
@@ -248,10 +245,26 @@ export async function buildStudyMap(deps: { db: Db; provider: ModelProvider; cfg
       messages: [...new Set(refs.flatMap((r) => (ctx.idOfRef.has(r) ? [ctx.idOfRef.get(r)!] : [])))],
       web: [...new Set(refs.flatMap((r) => (/^w\d+$/.test(r) && Number(r.slice(1)) <= web.length ? [Number(r.slice(1)) - 1] : [])))],
     });
+    // Message refs Nemotron wrote into the text ("asked in m7") become [[message id]] links the
+    // page shows as numbered sources, and count among the item's sources.
+    const linked = (text: string, refs: string[]) => {
+      const inText: string[] = [];
+      const out = text.replace(/\bm\d+\b/g, (r) => {
+        const id = ctx.idOfRef.get(r);
+        if (!id) return r;
+        inText.push(id);
+        return `[[${id}]]`;
+      });
+      const c = cites(refs);
+      return { text: out, messages: [...new Set([...c.messages, ...inText])], web: c.web };
+    };
     const seenKeys = new Set<string>();
     const concepts = shown.concepts
       .filter((c) => !seenKeys.has(c.key) && seenKeys.add(c.key))
-      .map((c) => ({ key: c.key, label: c.label, kind: (KINDS.has(c.kind) ? c.kind : 'concept') as StudyMapResult['concepts'][number]['kind'], explanation: c.explanation, ...cites(c.refs) }));
+      .map((c) => {
+        const l = linked(c.explanation, c.refs);
+        return { key: c.key, label: c.label, kind: (KINDS.has(c.kind) ? c.kind : 'concept') as StudyMapResult['concepts'][number]['kind'], explanation: l.text, messages: l.messages, web: l.web };
+      });
     const cores = concepts.filter((c) => c.kind === 'core');
     for (const c of cores.slice(1)) c.kind = 'concept';
     if (!cores.length) concepts[0].kind = 'core';
@@ -263,7 +276,7 @@ export async function buildStudyMap(deps: { db: Db; provider: ModelProvider; cfg
       topic_path: ctx.topicPath,
       concepts,
       relations,
-      guide: shown.guide.map((g) => ({ heading: g.heading, text: g.text, ...cites(g.refs) })),
+      guide: shown.guide.map((g) => ({ heading: g.heading, ...linked(g.text, g.refs) })),
       gaps: shown.gaps,
       web: { enabled: Boolean(search), queries, results: web.map((w) => ({ title: w.title, url: w.url })), note: webNote },
       read: { messages: ctx.messages.length, discussions: ctx.discussions.length },
@@ -327,7 +340,6 @@ export async function startStudyMap(db: Db, ctx: AuthCtx, messageId: string, bod
   const m = await requireMessage(db, ctx, messageId);
   const { root } = await placementOf(db, m.chatId, messageId);
   if (!root) throw new SafeError('This message is not on the map yet; concept maps need its topic.', 409, 'not_analysed');
-  if (!STUDY_ROOTS.includes(root)) throw new SafeError('Concept maps are for messages under Knowledge or Resources.', 409, 'not_study_material');
   const rebuild = (body as { rebuild?: unknown } | null)?.rebuild === true;
   const row = await latest(db, ctx.workspaceId, messageId);
   if (row && IN_PROGRESS.includes(row.status)) return getStudyMap(db, ctx, messageId);

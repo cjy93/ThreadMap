@@ -45,7 +45,7 @@ npm run image:build      # production image (docker build -t threadmap:local .)
 Run the full image locally (development only — this cannot satisfy the cloud gate):
 
 ```bash
-npm run secrets:generate > .env.compose          # then append the dev settings from .env.development.local.example
+npm run secrets:generate > .env.compose          # secrets only (git-ignored); settings are in compose.settings.env
 docker compose -p tmlocal up -d                  # db + migrate + app (3 supervised processes)
 docker compose -p tmlocal exec app node dist/cli/bootstrap-origin.js <DEPLOYMENT_ID> http://localhost:3000
 E2E_BASE_URL=http://localhost:3000 npm run test:e2e

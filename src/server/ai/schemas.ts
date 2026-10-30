@@ -92,6 +92,7 @@ export const AliasSchema = z.object({ aliases: z.array(z.string().min(1).max(48)
 export const RootReviewSchema = z.object({ roots: z.array(z.object({ key: z.string().min(1).max(16), root: RootEnum })).max(200).default([]) });
 
 /** Answers given without WhatsApp's Reply: each links a message to the earlier one it answers. */
+export const TrailSchema = z.object({ continues: z.array(ref).max(200).default([]), resolved_by: ref.nullable().default(null) });
 export const AnswersSchema = z.object({ links: z.array(z.object({ ref: ref, answers: ref })).max(200).default([]) });
 
 /** Answer: a direct reply to an Ask question, each point citing the messages or discussions it comes from. */
@@ -155,6 +156,7 @@ export const JSON_SCHEMAS: Record<string, Record<string, unknown>> = {
   filler: z.toJSONSchema(FillerSchema) as Record<string, unknown>,
   alias: z.toJSONSchema(AliasSchema) as Record<string, unknown>,
   answers: z.toJSONSchema(AnswersSchema) as Record<string, unknown>,
+  trail: z.toJSONSchema(TrailSchema) as Record<string, unknown>,
   roots: z.toJSONSchema(RootReviewSchema) as Record<string, unknown>,
   study_plan: z.toJSONSchema(StudyPlanSchema) as Record<string, unknown>,
   study_map: z.toJSONSchema(StudyMapSchema) as Record<string, unknown>,

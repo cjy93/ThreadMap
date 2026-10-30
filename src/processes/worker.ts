@@ -16,6 +16,7 @@ import { sweepExpired } from '../server/ingest/ingest';
 import { getStorage } from '../server/storage';
 import { BudgetExceededError } from '../server/ai/router';
 import { inferAnswers } from '../server/api/answers';
+import { inferTrail } from '../server/api/trail';
 import { answerQuestion, interpretRequest } from '../server/api/ask';
 import { buildStudyMap } from '../server/api/studymap';
 import { tavilySearch } from '../server/ai/websearch';
@@ -57,7 +58,7 @@ async function main() {
       void (async () => {
         let id = '';
         try {
-          const req = JSON.parse(n.payload ?? '{}') as { id: string; kind?: 'answer' | 'answers' | 'study'; workspaceId: string; chatIds: string[]; question: string; messageIds?: string[]; messageId?: string; studyMapId?: string; found?: string[]; words?: string[] };
+          const req = JSON.parse(n.payload ?? '{}') as { id: string; kind?: 'answer' | 'answers' | 'trail' | 'study'; workspaceId: string; chatIds: string[]; question: string; messageIds?: string[]; messageId?: string; studyMapId?: string; found?: string[]; words?: string[] };
           // A concept map saves its own result; the page reads it from there.
           if (req.kind === 'study') return void (await buildStudyMap(deps, req.studyMapId ?? '', webSearch));
           id = req.id;
@@ -66,6 +67,8 @@ async function main() {
               ? await answerQuestion(deps, req.workspaceId, req.chatIds, req.question, req.messageIds ?? [], (req.words ?? []).slice(0, 24))
               : req.kind === 'answers'
                 ? await inferAnswers(deps, req.workspaceId, req.messageId ?? '')
+                : req.kind === 'trail'
+                  ? await inferTrail(deps, req.workspaceId, req.messageId ?? '')
                 : await interpretRequest(deps, req.workspaceId, req.chatIds, req.question, (req.found ?? []).slice(0, 48));
           await db.execute(sql`SELECT pg_notify(${ASK_REPLY_CHANNEL}, ${JSON.stringify({ id, ok: true, ...r })})`);
         } catch (e) {

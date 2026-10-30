@@ -288,7 +288,12 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   // and when Nemotron is merely slow it searches again with its reading once that arrives.
   let note: string | null = null;
   let pending: string | null = null;
-  const matching = matchingMessagesSql({ userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds }, filter);
+  // Search looks through every message, read or missed: the Missed filter hid every read
+  // message from it ("LiceClip", read, could not be found). Dates and Everyone/Others/You
+  // still apply. Word matches also reach small talk; meaning matches do not (see `onMap`).
+  const scope = { userId: ctx.userId, workspaceId: ctx.workspaceId, chatIds };
+  const matching = matchingMessagesSql(scope, { ...filter, status: 'all', includeFiller: true });
+  const onMap = matchingMessagesSql(scope, { ...filter, status: 'all' });
   // First, plain text: the words in these chats that contain what was typed (no model involved).
   const fragments = fragmentsOf(question);
   const wordHits = chatIds.length && params.get('terms_json') === null ? await wordsContaining(db, matching, fragments) : [];
@@ -296,6 +301,9 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   // A further page of the same search: the page sends back the terms and topics already used.
   const offset = Math.max(0, Math.min(1_000_000, Number(params.get('offset')) || 0));
   const given = params.get('terms_json');
+  // Words picked from the list: grouped by those words, not the question. Messages with the word
+  // come first; near spellings ("LiceClip" for "licecap") follow in the last group.
+  const picked = given !== null && params.get('only') === '1';
   if (given !== null && chatIds.length) {
     const parsed = (() => {
       try {
@@ -335,10 +343,14 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   // Three tiers, each ranked by score within: 0 = the asked words as whole words ("the clip"),
   // 1 = a typed word inside a longer word ("LiceClip"), 2 = by meaning (Nemotron's terms, topics).
   const asked = normalizeSearch(question).trim();
-  const exactSql = asked.length > 1 ? sql`(m.search_text ~ ${`\\m${reEscape(asked)}\\M`})` : sql`false`;
+  const exactSql = picked
+    ? sql`(${sql.join(terms.map((t) => sql`m.search_text ~ ${`\\m${reEscape(t)}\\M`}`), sql` OR `)})`
+    : asked.length > 1
+      ? sql`(m.search_text ~ ${`\\m${reEscape(asked)}\\M`})`
+      : sql`false`;
   // Partial = a typed word of 4+ letters inside a longer word ("clip" in "liceclip"), never a
   // whole word: else a question with "the" would put nearly every message in this group.
-  const inside = fragments.filter((f) => f.length >= 4);
+  const inside = picked ? terms : fragments.filter((f) => f.length >= 4);
   const partialSql = inside.length
     ? sql`(${sql.join(inside.map((f) => sql`m.search_text ~ ${`[[:alnum:]]${reEscape(f)}|${reEscape(f)}[[:alnum:]]`}`), sql` OR `)})`
     : sql`false`;
@@ -349,7 +361,7 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
   // A term's weight is scaled from 1x (in every message searched) up to 2x (in just one), by how
   // many of the searched messages it matches; a typed word still outweighs Nemotron's additions.
   const rows = await db.execute<{ id: string; chat_id: string; sender_label: string; body: string | null; sent_at: Date | null; is_read: boolean; content_revision: number; score: number; tier: number; total: number }>(sql`
-    WITH mt AS (${matching}), terms(t, p, w) AS (VALUES ${termValues}),
+    WITH mt AS (${matching}), om AS (${onMap}), terms(t, p, w) AS (VALUES ${termValues}),
     n AS (SELECT greatest(count(*), 2)::float AS n FROM mt),
     ts AS (
       SELECT terms.t, terms.p, terms.w,
@@ -362,7 +374,7 @@ export async function ask(db: Db, ctx: AuthCtx, params: URLSearchParams, interpr
       FROM messages m JOIN mt ON mt.id = m.id)
     SELECT m.id, m.chat_id, m.sender_label, m.body, m.sent_at, mt.is_read, m.content_revision, scored.score::float AS score, ${tierSql} AS tier, count(*) OVER ()::int AS total
     FROM scored JOIN messages m ON m.id = scored.id JOIN mt ON mt.id = m.id
-    WHERE scored.score > 0
+    WHERE scored.score > 0 AND (${tierSql} < 2 OR m.id IN (SELECT id FROM om))
     ORDER BY ${tierSql}, scored.score DESC, m.sent_at DESC NULLS LAST, m.id DESC LIMIT ${ASK_PAGE_SIZE} OFFSET ${offset}`);
   const total = rows.rows[0]?.total ?? (offset ? offset : 0);
   const nextOffset = offset + rows.rows.length < total ? offset + rows.rows.length : null;

@@ -1,5 +1,5 @@
 'use client';
-// Ask results as a concept map: the question in the middle of a left-to-right
+// Ask results as a query map (its own name and look, apart from the mind map and the message concept map): the query in the middle of a left-to-right
 // tree. Broader topics ("abstractions") lead to the topics Nemotron picked and to
 // sibling topics where matching messages were found; the best messages hang off
 // their topic as details. Nodes can be dragged, your own concepts added and
@@ -7,6 +7,7 @@
 import {
   addEdge,
   Background,
+  BackgroundVariant,
   Controls,
   Handle,
   MiniMap,
@@ -64,7 +65,7 @@ export interface AskResult {
 type Kind = 'query' | 'abstraction' | 'topic' | 'sibling' | 'detail' | 'concept';
 type CData = { kind: Kind; label: string; sub?: string; root?: string; missed?: boolean; onClick?: () => void; onRename?: (label: string) => void };
 
-const KIND_LABEL: Record<Kind, string> = { query: 'Your question', abstraction: 'Abstraction', topic: 'Topic', sibling: 'Sibling', detail: 'Detail', concept: 'Your concept' };
+const KIND_LABEL: Record<Kind, string> = { query: 'Your query', abstraction: 'Abstraction', topic: 'Topic', sibling: 'Sibling', detail: 'Detail', concept: 'Your concept' };
 const ROOT_BY_TITLE: Record<string, string> = { knowledge: 'KNOWLEDGE', 'general chat': 'GENERAL_CHAT', 'events and activities': 'EVENTS_ACTIVITIES', resources: 'RESOURCES' };
 const DETAILS_PER_TOPIC = 4;
 const MAX_DETAILS = 40;
@@ -267,14 +268,14 @@ function Inner({ res, onOpenTopic, onOpenMessage }: { res: AskResult } & Handler
     };
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }));
-    a.download = `threadmap-concepts-${res.query.slice(0, 40).replace(/[^\w]+/g, '-')}.json`;
+    a.download = `threadmap-query-map-${res.query.slice(0, 40).replace(/[^\w]+/g, '-')}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
 
   return (
     <>
-      <div className="concept-tools" role="toolbar" aria-label="Concept map tools">
+      <div className="concept-tools" role="toolbar" aria-label="Query map tools">
         <button onClick={() => rf.fitView({ padding: 0.12, duration: 300, maxZoom: 1 })} title="Fit the whole map in view (or double-click empty space)">
           ⌖ Re-centre
         </button>
@@ -314,7 +315,7 @@ function Inner({ res, onOpenTopic, onOpenMessage }: { res: AskResult } & Handler
         maxZoom={2}
         proOptions={{ hideAttribution: true }}
       >
-        <Background gap={24} size={1} />
+        <Background variant={BackgroundVariant.Lines} gap={40} />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable className="concept-minimap" nodeClassName={(n) => `mm-${(n.data as CData).kind}`} />
       </ReactFlow>
@@ -335,13 +336,19 @@ function Inner({ res, onOpenTopic, onOpenMessage }: { res: AskResult } & Handler
 export function AskMap(props: { res: AskResult; onBack: () => void } & Handlers) {
   const { onBack, ...rest } = props;
   return (
-    <div style={{ position: 'absolute', inset: 0 }} aria-label="Concept map">
+    <div className="query-map" aria-label="Query map">
       <ReactFlowProvider>
         <Inner {...rest} />
       </ReactFlowProvider>
       <button className="concept-back" onClick={onBack}>
         ← Back to mind map
       </button>
+      {/* A title of its own, so it is not taken for the mind map or a message's concept map. */}
+      <header className="query-map-head">
+        <span className="qm-kicker">🔍 Query map</span>
+        <span className="qm-query">“{props.res.query}”</span>
+        <span className="qm-sub">From your Ask{props.res.total != null ? ` · ${props.res.total.toLocaleString('en-US')} matching message${props.res.total === 1 ? '' : 's'}` : ''} · click a topic or message to open it</span>
+      </header>
     </div>
   );
 }

@@ -96,3 +96,17 @@ describe('per-user inference allowance', () => {
     expect(row.usdMicrosUsed).toBe(600_000);
   });
 });
+
+describe('per-job call cap', () => {
+  it('LLM_MAX_CALLS_PER_JOB=0 means no limit', async () => {
+    const p = new Billed();
+    const ws = await workspace(OWNER);
+    const free = { ...cfg, LLM_MAX_CALLS_PER_JOB: 0 };
+    const logicalJobId = crypto.randomUUID();
+    await ensureLedger(t.db, ws, logicalJobId, free);
+    for (let i = 0; i < 3; i++) {
+      await callModel({ db: t.db, provider: p, cfg: free }, { workspaceId: ws, logicalJobId }, { role: 'fast', operation: 'test', system: 's', user: 'u', schema: z.object({ ok: z.boolean() }), schemaName: 'ok' });
+    }
+    expect(p.calls).toBe(3);
+  });
+});

@@ -32,6 +32,8 @@
   --events: #ffb454;
   --resources: #4fd1c5;
   --focus: #ffb15c;
+  /* The chosen bubble's ring: white, a colour no root uses (Events is already orange). */
+  --selected-ring: #ffffff;
   --danger: #ff8a8a;
   --edge: #96afff59;
   --dots: #96afff26;
@@ -66,6 +68,8 @@
   --events: #a35a00;
   --resources: #0f7c74;
   --focus: #1f4fd8;
+  /* White would vanish on the light background: near-black, likewise no root's colour. */
+  --selected-ring: #10142a;
   --danger: #b42318;
   --edge: #16296a4d;
   --dots: #16296a1f;
@@ -177,7 +181,12 @@ input[type='checkbox'] { accent-color: var(--accent); }
 .cnode .body:hover { background: color-mix(in srgb, currentColor 26%, var(--surface)); border-color: currentColor; }
 .cnode .body.zero { background: var(--surface); border-style: solid; border-width: 2px; color: var(--muted); box-shadow: none; }
 .cnode .body.unknown { border-style: dashed; color: var(--muted); box-shadow: none; }
-.cnode.selected .body { box-shadow: 0 0 0 5px var(--focus), 0 0 28px var(--focus); }
+.cnode.selected .body { box-shadow: 0 0 0 5px var(--selected-ring), 0 0 28px color-mix(in srgb, var(--selected-ring) 70%, transparent); }
+/* A clicked bubble also takes focus: no orange focus ring (Events' colour) before the white one.
+   Keyboard focus still shows, in the same white. Ring changes are instant, not faded. */
+.cnode .body { transition: background-color 150ms ease, border-color 150ms ease; }
+.cnode .body:focus { outline: none; }
+.cnode .body:focus-visible { outline: 3px solid var(--selected-ring); outline-offset: 4px; }
 .cnode .body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; text-align: center; overflow: hidden; }
 .cnode .body .title {
   color: var(--text); font-weight: 600; line-height: 1.15; overflow: hidden; white-space: normal;
@@ -364,6 +373,24 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .concept-tools button, .concept-back { background: var(--surface); }
 .concept-tools { position: absolute; top: 12px; right: 12px; z-index: 10; display: flex; gap: 6px; }
 .concept-back { position: absolute; top: 12px; left: 12px; z-index: 10; }
+/* Query map (Ask): its own title and look, so it is not mistaken for the mind map or a concept map.
+   Ruled background, message-like cards with a coloured side bar instead of outlined boxes. */
+.query-map { position: absolute; inset: 0; background: linear-gradient(180deg, color-mix(in srgb, var(--resources) 7%, transparent), transparent 40%); }
+.query-map .react-flow__background path { stroke: color-mix(in srgb, var(--resources) 14%, transparent); }
+.query-map-head {
+  position: absolute; top: 56px; left: 12px; z-index: 9; max-width: min(560px, calc(100% - 24px)); display: grid; gap: 2px; padding: 10px 16px;
+  border-radius: 14px; background: var(--surface); border: 1px solid color-mix(in srgb, var(--resources) 55%, transparent); border-left: 6px solid var(--resources); pointer-events: none;
+}
+.query-map-head .qm-kicker { font-size: 12px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--resources); }
+.query-map-head .qm-query { font-family: var(--font-fraunces), Georgia, serif; font-size: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.query-map-head .qm-sub { font-size: 12px; color: var(--muted); }
+.query-map .concept { border-radius: 6px 16px 16px 6px; border: 1px solid var(--border); border-left: 6px solid var(--c); background: var(--surface); box-shadow: 0 4px 14px var(--glass-shadow); }
+.query-map .concept.k-query { --c: var(--resources); border-radius: 999px; border: 2px solid var(--resources); padding: 12px 22px; box-shadow: 0 0 26px color-mix(in srgb, var(--resources) 40%, transparent); }
+.query-map .concept.k-abstraction { background: color-mix(in srgb, var(--c) 8%, var(--surface)); }
+.query-map .concept.k-detail { border-radius: 4px 16px 16px 16px; }
+.query-map .react-flow__edge-path { stroke: color-mix(in srgb, var(--resources) 55%, var(--muted)); }
+.query-map .concept-legend .sw { border-radius: 3px 6px 6px 3px; border-width: 1px 1px 1px 4px; border-style: solid; }
+.query-map .concept-legend .sw.k-query { border-color: var(--resources); border-width: 2px; border-radius: 999px; }
 .concept-legend {
   position: absolute; left: 60px; bottom: 12px; z-index: 10; display: flex; flex-wrap: wrap; gap: 10px; padding: 6px 10px;
   border-radius: 10px; background: var(--surface); border: 1px solid var(--border); font-size: 12px; color: var(--text-2);
@@ -385,6 +412,8 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .study-wrap { position: absolute; inset: 0; }
 .study-bar { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; pointer-events: none; }
 .study-bar > * { pointer-events: auto; }
+/* With a concept card open, the bar keeps clear of it instead of covering its heading. */
+.study-wrap:has(.study-panel) .study-bar { right: calc(min(380px, 100% - 24px) + 24px); }
 .study-bar button { background: var(--surface); }
 .study-title { font-family: var(--font-fraunces), Georgia, serif; font-weight: 400; font-size: 18px; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .concept.study.s-core { --c: var(--accent); width: 260px; border-width: 3px; }
@@ -392,7 +421,15 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .concept.study.s-detail { --c: var(--resources); border-width: 1px; }
 .concept.study.s-example { --c: var(--events); }
 .concept.study.s-question { --c: var(--italic); border-style: dashed; }
+.study-loose { width: 240px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); border-bottom: 1px dashed var(--border-strong); padding-bottom: 6px; }
+.concept.study .cchat { margin-left: 8px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-2); }
+.study-from { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.study-msg { display: block; width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.study-msg:hover { border-color: var(--border-strong); }
+.study-msg .meta { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
 .concept.study.picked { box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 45%, transparent), 0 6px 18px var(--glass-shadow); }
+/* A picked concept shows its whole title and explanation instead of the clipped preview. */
+.concept.study.picked .clabel, .concept.study.picked .csub { display: block; -webkit-line-clamp: unset; overflow: visible; }
 .concept-legend .sw.s-core { border-color: var(--accent); }
 .concept-legend .sw.s-concept { border-color: var(--knowledge); }
 .concept-legend .sw.s-detail { border-color: var(--resources); border-width: 1px; }
@@ -421,6 +458,10 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .study-steps li.now { color: var(--text); font-weight: 600; }
 .study-steps li.now::after { content: " …"; }
 .react-flow__edge.e-study path { stroke: var(--border-strong); }
+/* Concept map focus: the clicked concept's branch and links stay, the rest dims. */
+.react-flow__node.dim { opacity: 0.18; transition: opacity 0.15s; }
+.react-flow__edge.dim { opacity: 0.08; }
+.react-flow__edge.lit path { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }
 /* Chat list slides away for a bigger map (☰ in the top bar). */
 .shell { transition: grid-template-columns 200ms ease; }
 .shell.nav-hidden { grid-template-columns: 0px 1fr auto; }
@@ -522,6 +563,7 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .thread-catalog h4 { padding: 6px 0; }
 .thread button.thread-label { border: none; background: none; text-align: left; padding: 2px 0; cursor: pointer; color: var(--accent); }
 .thread .tmsg.filler { opacity: 0.6; }
+.thread .tmsg.resolves { border-color: var(--read); }
 /* An opened chat with nothing saved yet explains itself over the empty map. */
 .empty-chat { position: absolute; z-index: 3; top: 72px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); padding: 14px 18px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); box-shadow: 0 12px 32px var(--glass-shadow); }
 .empty-chat h3 { margin: 0 0 6px; font-family: var(--font-fraunces), Georgia, serif; font-weight: 400; font-size: 19px; }
@@ -745,3 +787,4 @@ button.msg:hover { border-color: var(--border-strong); background: var(--panel-2
 .msg-row .row-actions .mark-read { margin: 0; }
 .msg-row .to-small { padding: 3px 10px; font-size: 12px; color: var(--muted); }
 .msg.small-talk .to-map { float: right; margin: 0 0 6px 8px; padding: 3px 10px; font-size: 12px; color: var(--read); }
+

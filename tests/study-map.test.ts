@@ -37,9 +37,9 @@ describe('concept map', () => {
     const [opened] = (await placedUnder(chatId, 'KNOWLEDGE')).rows;
     expect(opened).toBeTruthy();
 
-    // Only Knowledge and Resources messages have a concept map.
+    // Every root has concept maps: other roots can hold knowledge too.
     const [chatty] = (await placedUnder(chatId, 'GENERAL_CHAT')).rows;
-    if (chatty) await expect(startStudyMap(t.db, ctx, chatty.id, {})).rejects.toThrow(/Knowledge or Resources/);
+    if (chatty) expect((await startStudyMap(t.db, ctx, chatty.id, {})).state).toBe('pending');
 
     const started = await startStudyMap(t.db, ctx, opened.id, {});
     expect(started.state).toBe('pending');
@@ -62,7 +62,7 @@ describe('concept map', () => {
                 concepts: [
                   { key: 'c1', label: 'Testing', kind: 'core', explanation: 'The subject.', refs: ['m1', 'w1', 'm999', 'w9'] },
                   { key: 'c2', label: 'Mocks', kind: 'core', explanation: 'A second core becomes a concept.', refs: ['w1'] },
-                  { key: 'c3', label: 'How?', kind: 'question', explanation: 'Asked in the chat.', refs: ['m1'] },
+                  { key: 'c3', label: 'How?', kind: 'question', explanation: 'Asked in m2, answered in m1 (m999 is not a message).', refs: ['m1'] },
                   { key: 'c3', label: 'Duplicate', kind: 'odd', explanation: '', refs: [] },
                 ],
                 relations: [
@@ -106,6 +106,11 @@ describe('concept map', () => {
     expect(r.sources[map.concepts[0].messages[0]]).toBeTruthy();
     // A link to a concept that does not exist is dropped.
     expect(map.relations.map((x) => x.label)).toEqual(['uses', 'answered by']);
+    // Refs written in the text become message links, and count among the item's sources.
+    const q = map.concepts[2];
+    expect(q.explanation).toMatch(/^Asked in \[\[[0-9a-f-]{36}\]\], answered in \[\[[0-9a-f-]{36}\]\] \(m999 is not a message\)\.$/);
+    expect(q.messages).toHaveLength(2);
+    for (const id of q.messages) expect(r.sources[id]).toBeTruthy();
     expect(map.guide[0].web).toEqual([0]);
 
     // Saved: opening it again does not rebuild; rebuilding starts a new one.

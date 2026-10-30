@@ -14,7 +14,8 @@ services:
     image: threadmap:local
     depends_on: { migrate: { condition: service_completed_successfully } }
     ports: ['3000:3000']
-    env_file: [.env.compose]
+    # Settings first, then the git-ignored secrets (a key in the later file wins).
+    env_file: [compose.settings.env, .env.compose]
     # Downloaded photos and files live here; a volume keeps them when the container is recreated.
     volumes: ['tm-objects:/app/.data']
     environment:

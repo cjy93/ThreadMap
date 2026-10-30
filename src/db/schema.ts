@@ -855,6 +855,20 @@ export const dailyBudget = pgTable('daily_budget', {
 
 // Lifetime inference spend per person: a WhatsApp number ("wa:<fingerprint>",
 // so a fresh QR scan does not reset it) or an unlinked workspace ("ws:<id>").
+// A question followed forward through the chat until it is resolved, across topic changes and
+// days: the later messages Nemotron read as continuing the opened message's discussion.
+export const messageTrails = pgTable('message_trails', {
+  messageId: uuid('message_id')
+    .primaryKey()
+    .references(() => messages.id, { onDelete: 'cascade' }),
+  workspaceId: uuid('workspace_id').notNull(),
+  // Message ids in time order.
+  messageIds: jsonb('message_ids').$type<string[]>().notNull().default([]),
+  // The message that settled it (an answer the asker accepted), if any.
+  resolvedBy: uuid('resolved_by'),
+  checkedAt: ts('checked_at').notNull().defaultNow(),
+});
+
 export const usageAllowance = pgTable('usage_allowance', {
   subject: text('subject').primaryKey(),
   usdMicrosReserved: bigint('usd_micros_reserved', { mode: 'number' }).notNull().default(0),

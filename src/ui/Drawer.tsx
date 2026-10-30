@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, filterParams, openOnDoubleClick, qs, sourceNumbers, type FilterState } from './client';
-import type { ChainMessage, ContentFile, ContentMessage, ContentResponse, PathItem, SourceMessage } from './types';
+import type { ChainMessage, ContentFile, ContentMessage, ContentResponse, MessageTrail, PathItem, SourceMessage } from './types';
 
 const pathText = (p: PathItem[]) => p.map((x) => x.title).join(' › ');
 const time = (s: string | null, tz: string) => (s ? new Date(s).toLocaleString('en-SG', { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' }) : 'Unknown time');
@@ -160,7 +160,7 @@ export function SourceView({
   onSuppress: (id: string) => void;
   onChanged: () => void;
   onOpenMessage: (chatId: string, id: string) => void;
-  /** Open this message's concept map (offered for Knowledge and Resources messages). */
+  /** Open this message's concept map (offered for any message on the map, under every root). */
   onConceptMap?: (id: string) => void;
 }) {
   const [m, setM] = useState<SourceMessage | null>(null);
@@ -193,6 +193,30 @@ export function SourceView({
     };
   }, [needsAnswers, messageId, load]);
 
+  // Where the discussion went next, across topic changes and days: shown when saved, followed on request.
+  const [trail, setTrail] = useState<MessageTrail | null>(null);
+  const [following, setFollowing] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api<MessageTrail>(`/api/messages/${messageId}/trail`).then(
+      (r) => live && setTrail(r),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [messageId]);
+  const follow = async () => {
+    setFollowing(true);
+    try {
+      setTrail(await api<MessageTrail>(`/api/messages/${messageId}/trail`, { method: 'POST' }));
+    } catch (e) {
+      setTrail({ checked: false, note: (e as Error).message });
+    } finally {
+      setFollowing(false);
+    }
+  };
+
   // Dwell timer: pauses/resets when hidden, unfocused, closed, or revision changes.
   useEffect(() => {
     if (!m || !m.reviewable || m.review === 'read' || suppressed) return;
@@ -222,7 +246,11 @@ export function SourceView({
 
   if (err) return <p role="alert">{err}</p>;
   if (!m) return <p>Loading source…</p>;
-  const chainCount = m.reply_chain.before.length + m.reply_chain.after.length;
+  // The rest of the discussion Nemotron grouped this message into: answers given without Reply
+  // that were not linked still show here, and each opens into its own discussion.
+  const inChain = new Set([m.message_id, ...m.reply_chain.before.map((c) => c.message_id), ...m.reply_chain.after.map((c) => c.message_id)]);
+  const rest = m.thread?.messages.filter((c) => !inChain.has(c.message_id)) ?? [];
+  const chainCount = m.reply_chain.before.length + m.reply_chain.after.length + rest.length;
   // Move this message off the map as small talk, or back onto the map (the owner's choice is kept).
   const moveSmallTalk = async (small: boolean) => {
     setMoveNote(null);
@@ -261,7 +289,7 @@ export function SourceView({
         {m.edited_at ? <span className="pill" style={{ marginLeft: 6 }}>edited · revision {m.content_revision}</span> : null}
       </p>
       {m.marker ? <p className="pill">{m.marker}</p> : m.body ? <div className="src">{m.body}</div> : null}
-      {onConceptMap && m.state === 'active' && m.topic_paths.some((p) => p.root === 'KNOWLEDGE' || p.root === 'RESOURCES') ? (
+      {onConceptMap && m.state === 'active' && m.topic_paths.length > 0 ? (
         <p>
           <button
             className="primary"
@@ -315,7 +343,7 @@ export function SourceView({
         <button
           aria-pressed={around === 'chain'}
           onClick={() => setAround('chain')}
-          title="What this message replies to and every reply to it (and replies to those): WhatsApp replies, and answers given without pressing Reply that Nemotron found"
+          title="What this message replies to and every reply to it (and replies to those): WhatsApp replies, and answers given without pressing Reply that Nemotron found; then the rest of the discussion Nemotron grouped it into"
         >
           Discussion{chainCount ? ` (${chainCount})` : ''}
         </button>
@@ -346,7 +374,44 @@ export function SourceView({
           {m.reply_chain.after.map((c) => (
             <ChainItem key={c.message_id} c={c} tz={tz} onOpen={() => onOpenMessage(m.chat.id, c.message_id)} />
           ))}
-          {!chainCount && !needsAnswers ? <p className="counts">No replies to or from this message, including answers given without Reply. See it in the Chatroom.</p> : null}
+          {rest.length ? <div className="thread-label">Also in this discussion, in time order (double-click one to follow its own discussion)</div> : null}
+          {rest.map((c) => (
+            <div key={c.message_id} className={`tmsg ${c.direction === 'outgoing' ? 'mine' : ''} ${c.filler ? 'filler' : ''}`} {...openOnDoubleClick(() => onOpenMessage(m.chat.id, c.message_id))}>
+              <div className="meta">
+                <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
+                {c.reply_to ? <span> · replies to {c.reply_to.sender}</span> : c.answers ? <span title="Reply was not used; Nemotron read this as an answer"> · answers {c.answers.sender}</span> : null}
+              </div>
+              {c.snippet ?? '(removed)'}
+            </div>
+          ))}
+          {trail?.checked && trail.messages?.length ? (
+            <>
+              <div className="thread-label">Where it went next, across the chat{trail.resolved ? ' · resolved' : ' · not settled yet'}</div>
+              {trail.messages.map((c) => (
+                <div key={c.message_id} className={`tmsg ${c.direction === 'outgoing' ? 'mine' : ''} ${c.resolves ? 'resolves' : ''}`} {...openOnDoubleClick(() => onOpenMessage(m.chat.id, c.message_id))}>
+                  <div className="meta">
+                    <strong>{c.sender}</strong> · {time(c.sent_at, tz)}
+                    {c.resolves ? <span> · settled it</span> : null}
+                  </div>
+                  {c.snippet ?? '(removed)'}
+                </div>
+              ))}
+            </>
+          ) : null}
+          {trail?.checked && !trail.messages?.length ? <p className="counts">Nemotron found no later messages continuing this discussion (up to a week on).</p> : null}
+          {trail && !trail.checked ? (
+            <p>
+              <button
+                disabled={following}
+                onClick={() => void follow()}
+                title="NVIDIA Nemotron reads up to a week of later messages and keeps the ones that continue this question (answers, corrections, follow-ups), even after the topic drifts, until it is settled"
+              >
+                {following ? 'Following…' : trail.stale ? '🔎 Follow again (newer messages)' : '🔎 Where did this go next?'}
+              </button>
+              {trail.note ? <span className="counts"> {trail.note}</span> : null}
+            </p>
+          ) : null}
+          {!chainCount && !needsAnswers && !trail?.messages?.length ? <p className="counts">No replies to or from this message, including answers given without Reply. See it in the Chatroom.</p> : null}
         </section>
       ) : (
         <Chatroom key={m.message_id} first={m.context} tz={tz} onOpen={(id) => onOpenMessage(m.chat.id, id)} />

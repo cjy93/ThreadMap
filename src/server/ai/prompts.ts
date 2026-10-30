@@ -153,6 +153,20 @@ Return {"links":[{"ref","answers"}]}.`,
   };
 }
 
+/** Follow a question forward through later messages until it is resolved. */
+export function trailPrompt(chatTitle: string, thread: PromptMessage[], later: PromptMessage[]) {
+  return {
+    system: `You follow one question or subject through a WhatsApp chat. ${GUARD}
+"thread" is the discussion so far, in time order (the opened message and what it belongs to). "later" are messages sent after it, in time order; other conversations are mixed in, and replies can come hours or days later, often without WhatsApp's Reply.
+Give the refs of the "later" messages that continue THIS thread: an answer, a correction (e.g. a name said wrongly the first time), a clarification, a follow-up question on the same thing, or a reaction to one of those. The subject may drift (e.g. from a tool's name to what it records to a better tool for video): keep following it while people are still working out the same question.
+- Leave out messages about other subjects, even from the same people.
+- resolved_by: the ref of the message that settled it (the answer the asker accepted or acted on), or null if it is still open.
+- Only refs you are confident in.
+Return {"continues":[ref],"resolved_by":ref|null}.`,
+    user: JSON.stringify({ chat: chatTitle, thread, later }),
+  };
+}
+
 /** Re-check which root each discussion belongs to (discussions read under an older rubric). */
 export function rootReviewPrompt(chatTitle: string, discussions: { key: string; title: string; terms: string[]; sample: string; root: string }[]) {
   return {
@@ -316,7 +330,7 @@ Refs: m… are chat messages, w… are web pages. Return {"title","summary","con
 - concepts (at most 24): exactly one with kind "core" (the subject). Other kinds: "concept" (an idea to understand), "detail" (a fact, setting, step or value), "example" (a worked example or case from the chat), "question" (a question asked in the chat). key: short ids c1, c2…; label: a few words.
 - explanation: teach it in 1–4 plain sentences, as a tutor would. Ground it in the chat (m refs) and use the web pages (w refs) to explain, complete or correct it. If a web page contradicts the chat, say so.
 - Every question from the plan becomes a "question" concept linked to the concept that answers it ("answered by"); an unanswered question is linked to what it is about and listed in gaps.
-- relations: labelled links between concept keys ("is a", "part of", "uses", "requires", "example of", "answered by", "leads to"…). Every concept is connected, directly or through others, to the core.
+- relations: labelled links between concept keys ("is a", "part of", "uses", "requires", "example of", "answered by", "leads to"…). Every concept must be connected, directly or through others, to the core: before adding one, name the link that ties it in. The messages and discussions also cover other conversations in this part of the chat (other people, other subjects); leave out anything that does not bear on the subject rather than adding a concept you cannot link.
 - guide: a study guide in learning order (basics first, then details, then how it fits together), 3–8 sections, each citing its refs.
 - gaps: what is still unclear or worth studying next.
 - summary: 2–4 sentences on what the discussion established.`,

@@ -125,6 +125,7 @@ const llmSchema = z.object({
   NEBIUS_MODEL_REASONING_FALLBACK: optStr,
   LLM_MAX_USD_PER_JOB: num(1),
   LLM_MAX_USD_PER_DAY: num(5),
+  // Model calls one analysis job may make; 0 = no limit.
   LLM_MAX_CALLS_PER_JOB: int(100),
   // Lifetime spend per user (USD); 0 disables the cap. Numbers in
   // LLM_UNLIMITED_PHONES (digits with country code, comma-separated) skip the

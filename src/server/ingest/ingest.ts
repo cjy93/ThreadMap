@@ -115,6 +115,18 @@ async function setDirectTitle(db: Db | Tx, chat: ChatRow, title: string) {
   await db.update(s.chats).set({ title }).where(eq(s.chats.id, chat.id));
 }
 
+const UNKNOWN_SENDER = 'Unknown sender';
+
+/** Group messages saved before their sender's contact name arrived take that name now. */
+async function nameUnknownSenders(db: Db, ctx: IngestContext) {
+  await db.execute(sql`
+    UPDATE messages m SET sender_label = p.display_name,
+      search_text = CASE WHEN m.search_text IS NULL THEN NULL ELSE m.search_text || ' ' || lower(p.display_name) END
+    FROM participants p
+    WHERE p.id = m.sender_participant_id AND m.workspace_id = ${ctx.workspaceId}::uuid
+      AND m.sender_label = ${UNKNOWN_SENDER} AND NOT m.from_me AND p.display_name IS NOT NULL AND p.display_name <> ''`);
+}
+
 /** Remember a contact's name and apply it to their direct chat if one exists. */
 async function applyContact(db: Db, ctx: IngestContext, ev: ContactEvent) {
   const jids = [ev.jid, ev.altJid].filter((j): j is string => Boolean(j));
@@ -341,6 +353,8 @@ export async function ingestEvents(db: Db, ctx: IngestContext, events: Normalize
   for (const e of events) {
     if (e.type === 'contact') await applyContact(db, ctx, e);
   }
+  // Also on chat metadata, which every (re)connect sends, so messages saved earlier catch up.
+  if (events.some((e) => e.type === 'contact' || e.type === 'chat_meta')) await nameUnknownSenders(db, ctx);
   // A group message carries its sender's own WhatsApp name (WhatsApp shows it as "~Name").
   // Only that name is kept, for groups selected or not, so people's direct chats can be named.
   const senders = new Set<string>();
@@ -524,8 +538,13 @@ async function applyMessage(tx: Tx, ctx: IngestContext, chat: ChatRow, e: Messag
     e.senderName,
     e.fromMe,
   );
-  // A one-to-one chat's other side is the chat itself when WhatsApp sends no name.
-  const senderLabel = e.fromMe ? 'You' : (e.senderName ?? (chat.kind === 'direct' ? chat.title : 'Unknown sender'));
+  // A one-to-one chat's other side is the chat itself when WhatsApp sends no name; in a group,
+  // history messages often carry none, so the sender's known contact name is used.
+  const knownSender =
+    !e.fromMe && !e.senderName && chat.kind !== 'direct'
+      ? ((await tx.select({ name: s.participants.displayName }).from(s.participants).where(eq(s.participants.id, senderParticipantId)))[0]?.name ?? null)
+      : null;
+  const senderLabel = e.fromMe ? 'You' : (e.senderName ?? (chat.kind === 'direct' ? chat.title : (knownSender ?? UNKNOWN_SENDER)));
   const now = ctx.now?.() ?? new Date();
   const expiresAt = e.ephemeralSec && sentAt ? new Date(sentAt.getTime() + e.ephemeralSec * 1000) : null;
   const latestEdit = pendingEdits.at(-1);

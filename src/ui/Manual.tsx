@@ -132,13 +132,13 @@ export function ManualContent() {
             (&ldquo;davinci = Elucidex&rdquo;) are searched too. Ask only searches your own chats, never the internet.
           </li>
           <li>
-            The answer appears as a <strong>concept map</strong>: your question → broader topics (abstraction) → the topics picked (topic) and other topics with matches (sibling) →
+            The answer appears as a <strong>query map</strong> (titled 🔍 Query map): your query → broader topics (abstraction) → the topics picked (topic) and other topics with matches (sibling) →
             the best messages (detail). A message in several topics appears once, with dashed “also in” links.
           </li>
           <li>
             Click a message to read it, or a topic to jump to it on the chat map. <strong>Find in this map</strong> highlights matching boxes (Enter jumps to the next,
             Shift+Enter to the previous). <strong>+ Concept</strong> adds your own notes (drag from a node’s right edge to link them), <strong>Tidy layout</strong> rearranges,{' '}
-            <strong>Export</strong> saves the map as a file. The top bar&rsquo;s controls belong to the mind map: on the Ask map, <strong>← Back to mind map</strong> takes their
+            <strong>Export</strong> saves the map as a file. The top bar&rsquo;s controls belong to the mind map: on the query map, <strong>← Back to mind map</strong> takes their
             place and brings them back.
           </li>
           <li>

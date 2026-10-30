@@ -135,6 +135,27 @@ describe('direct chats are named by person, not a placeholder', () => {
     expect(await title(person)).toBe('Siti (lab partner)');
   });
 
+  it('names group senders whose history messages carry no name, from their contact', async () => {
+    const group = '5151@g.us';
+    await ingestEvents(t.db, ctx, [{ type: 'chat_meta', chatJid: group, kind: 'group', title: 'Lab group' }]);
+    await t.db.update(s.chats).set({ selected: true }).where(and(eq(s.chats.workspaceId, ctx.workspaceId), eq(s.chats.nativeJid, group)));
+    const [chat] = await t.db.select().from(s.chats).where(and(eq(s.chats.workspaceId, ctx.workspaceId), eq(s.chats.nativeJid, group)));
+    const from = (person: string) => ({ ...msg(group, false, null), chatKind: 'group' as const, participantJid: person, senderJid: person });
+    const labels = async () => (await t.db.select().from(s.messages).where(eq(s.messages.chatId, chat.id)).orderBy(s.messages.createdAt)).map((m) => [m.senderLabel, m.searchText]);
+
+    // Saved before the contact arrived: unnamed, then named once it does.
+    await ingestEvents(t.db, ctx, [from('6533330001@s.whatsapp.net')]);
+    expect((await labels())[0][0]).toBe('Unknown sender');
+    await ingestEvents(t.db, ctx, [contact('6533330001@s.whatsapp.net', 'Mei', null)]);
+    expect((await labels())[0]).toEqual(['Mei', expect.stringContaining('mei')]);
+    // Contact already known: named when saved.
+    await ingestEvents(t.db, ctx, [contact('6533330002@s.whatsapp.net', null, 'Raj'), from('6533330002@s.whatsapp.net')]);
+    expect((await labels())[1][0]).toBe('Raj');
+    // Nobody knows them: stays neutral.
+    await ingestEvents(t.db, ctx, [from('6533330003@s.whatsapp.net')]);
+    expect((await labels())[2][0]).toBe('Unknown sender');
+  });
+
   it('keeps group names and a neutral label when nothing is known', async () => {
     await ingestEvents(t.db, ctx, [{ type: 'chat_meta', chatJid: '1203@g.us', kind: 'group', title: 'Hackathon team' }]);
     expect(await title('1203@g.us')).toBe('Hackathon team');

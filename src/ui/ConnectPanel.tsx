@@ -147,6 +147,19 @@ export function ConnectPanel({
   const linked = LINKED.includes(state);
   const waitingForQr = !linked && (requested || state === 'pairing' || state === 'connecting');
   const waitingForChats = linked && !chats.length;
+  // A request made while WhatsApp was reconnecting is released unanswered (the row is due again):
+  // once connected, ask again for the rows on screen.
+  useEffect(() => {
+    if (state !== 'connected' || !avatarObserver) return;
+    for (const ch of chats) {
+      if (!ch.avatar_due || !askedAvatars.current.delete(ch.id)) continue;
+      const el = document.querySelector(`tr[data-chat-id="${ch.id}"]`);
+      if (el) {
+        avatarObserver.unobserve(el);
+        avatarObserver.observe(el);
+      }
+    }
+  }, [chats, state, avatarObserver]);
   // Live notices drive updates; polling covers a missed notice while the owner is mid-setup.
   useEffect(() => {
     if (!waitingForQr && !waitingForChats) return;

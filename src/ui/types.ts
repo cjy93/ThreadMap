@@ -142,7 +142,7 @@ export interface SourceMessage {
   reviewable: boolean;
   /** Left off the map as small talk (by the rules, or moved there by the owner). */
   small_talk?: boolean;
-  /** root: the category the topic is under (concept maps are offered for KNOWLEDGE and RESOURCES). */
+  /** root: the category the topic is under. */
   topic_paths: { primary: boolean; root?: string; path: PathItem[] }[];
   attachments: { id: string; media_type: string; mime: string | null; filename: string | null; size: number | null; availability: string; has_preview: boolean; description: string | null }[];
   context: { message_id: string; sender: string; direction: string; current: boolean; snippet: string | null; sent_at: string | null }[];
@@ -170,6 +170,16 @@ export interface SourceMessage {
     before: ChainMessage[];
     after: ChainMessage[];
   };
+}
+
+/** Where an opened message's discussion went next: later messages Nemotron followed it to. */
+export interface MessageTrail {
+  checked: boolean;
+  /** A saved, unresolved trail with newer messages since: following again may find more. */
+  stale?: boolean;
+  note?: string;
+  resolved?: boolean;
+  messages?: { message_id: string; sender: string; direction: string; snippet: string | null; sent_at: string | null; resolves: boolean }[];
 }
 
 /** A concept map (study guide) built from one message by Nemotron Ultra, with web sources. */

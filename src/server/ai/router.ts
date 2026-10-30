@@ -82,7 +82,7 @@ async function reserve(db: Db, logicalJobId: string, cfg: LlmConfig, estMicros: 
   const job = await db.execute(sql`
     UPDATE budget_ledger SET calls_reserved = calls_reserved + 1, usd_micros_reserved = usd_micros_reserved + ${estMicros}, updated_at = now()
     WHERE logical_job_id = ${logicalJobId}::uuid
-      AND calls_reserved + calls_used < max_calls
+      AND (max_calls <= 0 OR calls_reserved + calls_used < max_calls)
       AND (${who.unlimited} OR usd_micros_reserved + usd_micros_used + ${estMicros} <= max_usd_micros)
     RETURNING logical_job_id`);
   if (!job.rows.length) throw new BudgetExceededError('job');

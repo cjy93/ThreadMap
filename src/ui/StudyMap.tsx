@@ -9,27 +9,45 @@ import { api, sourceNumbers } from './client';
 import type { StudyMap, StudyMapState, StudySource } from './types';
 
 type Kind = StudyMap['concepts'][number]['kind'];
-type SData = { kind: Kind; label: string; sub: string; selected: boolean; onClick: () => void };
+// chat: how many chat messages it was drawn from (its card lists them).
+// full: the whole explanation, shown while the concept is picked (sub is its short preview).
+type SData = { kind: Kind; label: string; sub: string; full: string; chat: number; selected: boolean; onClick: () => void };
 
 const KIND_LABEL: Record<Kind, string> = { core: 'Subject', concept: 'Concept', detail: 'Detail', example: 'Example', question: 'Question' };
 const COL_W = 300;
 const ROW_H = 92;
 const POLL_MS = 3000;
+const LOOSE_Y = -60;
 
 const StudyNode = memo(function StudyNode({ data }: NodeProps<Node<SData>>) {
   return (
     <div className={`concept study s-${data.kind} ${data.selected ? 'picked' : ''}`}>
       <Handle type="target" position={Position.Left} isConnectable={false} />
       <Handle type="source" position={Position.Right} isConnectable={false} />
-      <span className="ctype">{KIND_LABEL[data.kind]}</span>
+      <span className="ctype">
+        {KIND_LABEL[data.kind]}
+        {data.chat ? (
+          <span className="cchat" title={`Drawn from ${data.chat} chat message${data.chat === 1 ? '' : 's'}: click the title, then a message, to open its discussion`}>
+            💬 {data.chat}
+          </span>
+        ) : null}
+      </span>
       <button className="clabel nodrag" onClick={data.onClick} title={`${data.label}: click to read the explanation`}>
         {data.label}
       </button>
-      {data.sub ? <span className="csub">{data.sub}</span> : null}
+      {data.sub ? <span className="csub">{data.selected ? data.full : data.sub}</span> : null}
     </div>
   );
 });
-const nodeTypes = { study: StudyNode };
+// The heading over concepts Nemotron did not link to the subject.
+const LooseHeading = memo(function LooseHeading() {
+  return (
+    <div className="study-loose" title="Nemotron wrote these from the same messages but did not link them to the subject">
+      Also in these messages (not linked to the subject)
+    </div>
+  );
+});
+const nodeTypes = { study: StudyNode, loose: LooseHeading };
 
 // A link's label read the other way, for links the tree draws against their direction
 // (e.g. "question answered by detail" drawn detail → question reads "answer to").
@@ -99,7 +117,8 @@ export function layoutStudyMap(map: StudyMap) {
   };
   place(core.key, 0);
   const maxDepth = Math.max(0, ...[...pos.values()].map((p) => p.x / COL_W));
-  loose.forEach((k, i) => pos.set(k, { x: (maxDepth + 1) * COL_W, y: i * (ROW_H + 16) }));
+  // Below a heading saying they are not linked to the subject (placed at LOOSE_Y).
+  loose.forEach((k, i) => pos.set(k, { x: (maxDepth + 1) * COL_W, y: LOOSE_Y + 40 + ROW_H / 2 + i * (ROW_H + 16) }));
   const tree = new Set([...parent.values()].filter(Boolean).map((p) => p!.rel));
   const edges: Edge[] = [];
   for (const [k, p] of parent) {
@@ -111,8 +130,62 @@ export function layoutStudyMap(map: StudyMap) {
   map.relations.forEach((r, i) => {
     if (!tree.has(r) && pos.has(r.from) && pos.has(r.to)) edges.push({ id: `x:${i}`, source: r.from, target: r.to, type: 'default', className: 'e-cross', label: r.label || undefined });
   });
-  return { pos, edges, coreKey: core.key };
+  return { pos, edges, coreKey: core.key, parent, loose, looseX: (maxDepth + 1) * COL_W };
 }
+
+/**
+ * What lights up when a concept is clicked: the concept, its path back to the core, its
+ * branch below it, and every concept it links to directly. Everything else is dimmed.
+ */
+export function branchOf(map: StudyMap, layout: ReturnType<typeof layoutStudyMap>, key: string) {
+  const nodes = new Set([key]);
+  for (let p = layout.parent.get(key); p; p = layout.parent.get(p.key)) nodes.add(p.key);
+  const below = [key];
+  while (below.length) {
+    const k = below.pop()!;
+    for (const [child, p] of layout.parent) {
+      if (p?.key !== k || nodes.has(child)) continue;
+      nodes.add(child);
+      below.push(child);
+    }
+  }
+  const tree = new Set(nodes);
+  for (const r of map.relations) {
+    if (r.from === key) nodes.add(r.to);
+    if (r.to === key) nodes.add(r.from);
+  }
+  // Tree links along the path and branch, and any link touching the concept itself.
+  const edges = new Set(
+    layout.edges
+      .filter((e) => (e.id.startsWith('t:') && tree.has(e.source) && tree.has(e.target)) || e.source === key || e.target === key)
+      .map((e) => e.id),
+  );
+  return { nodes, edges };
+}
+
+const LINKS = /\[\[([0-9a-f-]{36})\]\]/g;
+
+/** Text with the chat messages it mentions ("asked in [3]") as numbered links that open them. */
+function Linked({ text, sources, numberOf, onOpenMessage }: { text: string; sources: Record<string, StudySource>; numberOf: Map<string, number>; onOpenMessage: (chatId: string, id: string) => void }) {
+  const parts = text.split(LINKS);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (i % 2 === 0) return part;
+        const s = sources[part];
+        if (!s) return 'a chat message';
+        const tip = `${s.sender}: “${s.snippet.slice(0, 160)}”. Click to open the message.`;
+        return (
+          <button key={i} className="cite" title={tip} aria-label={tip} onClick={() => onOpenMessage(s.chat_id, part)}>
+            [{numberOf.get(part)}]
+          </button>
+        );
+      })}
+    </>
+  );
+}
+/** The same text as plain words, for a node's short preview. */
+const plainText = (text: string, numberOf: Map<string, number>) => text.replace(LINKS, (_, id: string) => (numberOf.has(id) ? `[${numberOf.get(id)}]` : 'a chat message'));
 
 /** [1] chat messages (open them) and [W1] web pages (open in a new tab). */
 function Cites({ messages, web, map, sources, numberOf, onOpenMessage }: { messages: string[]; web: number[]; map: StudyMap; sources: Record<string, StudySource>; numberOf: Map<string, number>; onOpenMessage: (chatId: string, id: string) => void }) {
@@ -145,15 +218,33 @@ function MapPane({ map, sources, numberOf, onOpenMessage }: { map: StudyMap; sou
   const layout = useMemo(() => layoutStudyMap(map), [map]);
   // The concept whose card is open; null when the card is closed (✕ or a click on empty space).
   const [picked, setPicked] = useState<string | null>(layout.coreKey);
-  const nodes: Node<SData>[] = map.concepts.map((c) => {
+  // The concept whose branch is highlighted (others dimmed) until a double-click anywhere.
+  const [focus, setFocus] = useState<string | null>(null);
+  const lit = useMemo(() => (focus && layout.pos.has(focus) ? branchOf(map, layout, focus) : null), [focus, map, layout]);
+  const pick = (key: string) => {
+    setPicked(key);
+    setFocus(key);
+  };
+  const preview = (text: string) => {
+    const p = plainText(text, numberOf);
+    return p.length > 90 ? `${p.slice(0, 90)}…` : p;
+  };
+  const conceptNodes: Node<SData>[] = map.concepts.map((c) => {
     const p = layout.pos.get(c.key)!;
     return {
       id: c.key,
       type: 'study',
       position: { x: p.x, y: p.y - ROW_H / 2 },
-      data: { kind: c.kind, label: c.label, sub: c.explanation.length > 90 ? `${c.explanation.slice(0, 90)}…` : c.explanation, selected: c.key === picked, onClick: () => setPicked(c.key) },
+      className: lit && !lit.nodes.has(c.key) ? 'dim' : undefined,
+      // Picked, it opens to its whole text, drawn over the concepts below it.
+      zIndex: c.key === picked ? 1000 : 0,
+      data: { kind: c.kind, label: c.label, sub: preview(c.explanation), full: plainText(c.explanation, numberOf), chat: c.messages.filter((id) => sources[id]).length, selected: c.key === picked, onClick: () => pick(c.key) },
     };
   });
+  const nodes: Node[] = layout.loose.length
+    ? [...conceptNodes, { id: 'loose-heading', type: 'loose', position: { x: layout.looseX, y: LOOSE_Y }, data: {}, selectable: false, draggable: false }]
+    : conceptNodes;
+  const edges = lit ? layout.edges.map((e) => ({ ...e, className: `${e.className ?? ''} ${lit.edges.has(e.id) ? 'lit' : 'dim'}` })) : layout.edges;
   useEffect(() => {
     requestAnimationFrame(() => rf.fitView({ padding: 0.12, maxZoom: 1 }));
   }, [layout, rf]);
@@ -162,7 +253,20 @@ function MapPane({ map, sources, numberOf, onOpenMessage }: { map: StudyMap; sou
   const labelOf = (k: string) => map.concepts.find((x) => x.key === k)?.label ?? k;
   return (
     <>
-      <ReactFlow nodes={nodes} edges={layout.edges} nodeTypes={nodeTypes} nodesConnectable={false} zoomOnDoubleClick={false} onPaneClick={() => setPicked(null)} minZoom={0.1} maxZoom={2} proOptions={{ hideAttribution: true }}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        nodesConnectable={false}
+        zoomOnDoubleClick={false}
+        onNodeClick={(_, n) => n.type === 'study' && pick(n.id)}
+        onPaneClick={() => setPicked(null)}
+        // A double-click anywhere on the map releases the highlight.
+        onDoubleClick={() => setFocus(null)}
+        minZoom={0.1}
+        maxZoom={2}
+        proOptions={{ hideAttribution: true }}
+      >
         <Background gap={24} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
@@ -173,10 +277,28 @@ function MapPane({ map, sources, numberOf, onOpenMessage }: { map: StudyMap; sou
           </button>
           <div className="ctype">{KIND_LABEL[c.kind]}</div>
           <h3>{c.label}</h3>
-          <p>{c.explanation || 'No explanation given.'}</p>
-          {c.messages.length || c.web.length ? (
+          <p>{c.explanation ? <Linked text={c.explanation} sources={sources} numberOf={numberOf} onOpenMessage={onOpenMessage} /> : 'No explanation given.'}</p>
+          {/* Nemotron wrote this from these chat messages: each opens in its discussion and chatroom. */}
+          {c.messages.some((id) => sources[id]) ? (
+            <div className="study-from">
+              <div className="counts">From the chat · click one to open its discussion</div>
+              {c.messages.map((id) => {
+                const s = sources[id];
+                return s ? (
+                  <button key={id} className="study-msg" onClick={() => onOpenMessage(s.chat_id, id)} title="Open this message with its discussion and chatroom">
+                    <span className="meta">
+                      <strong>{s.sender}</strong>
+                      {s.sent_at ? ` · ${new Date(s.sent_at).toLocaleString('en-SG', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}
+                    </span>
+                    {s.snippet || '(no text)'}
+                  </button>
+                ) : null;
+              })}
+            </div>
+          ) : null}
+          {c.web.length ? (
             <p className="counts">
-              Sources: <Cites messages={c.messages} web={c.web} map={map} sources={sources} numberOf={numberOf} onOpenMessage={onOpenMessage} />
+              Web: <Cites messages={[]} web={c.web} map={map} sources={sources} numberOf={numberOf} onOpenMessage={onOpenMessage} />
             </p>
           ) : null}
           {links.length ? (
@@ -185,11 +307,11 @@ function MapPane({ map, sources, numberOf, onOpenMessage }: { map: StudyMap; sou
                 <li key={i}>
                   {r.from === picked ? (
                     <>
-                      <em>{r.label || 'relates to'}</em> → <button onClick={() => setPicked(r.to)}>{labelOf(r.to)}</button>
+                      <em>{r.label || 'relates to'}</em> → <button onClick={() => pick(r.to)}>{labelOf(r.to)}</button>
                     </>
                   ) : (
                     <>
-                      <button onClick={() => setPicked(r.from)}>{labelOf(r.from)}</button> → <em>{r.label || 'relates to'}</em> this
+                      <button onClick={() => pick(r.from)}>{labelOf(r.from)}</button> → <em>{r.label || 'relates to'}</em> this
                     </>
                   )}
                 </li>
@@ -225,7 +347,7 @@ function GuidePane({ map, sources, numberOf, onOpenMessage }: { map: StudyMap; s
             {i + 1}. {g.heading}
           </h3>
           <p>
-            {g.text} {cite(g.messages, g.web)}
+            <Linked text={g.text} sources={sources} numberOf={numberOf} onOpenMessage={onOpenMessage} /> {cite(g.messages.filter((id) => !g.text.includes(id)), g.web)}
           </p>
         </section>
       ))}

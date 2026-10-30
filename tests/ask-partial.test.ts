@@ -112,6 +112,20 @@ describe('Ask: part of a word, ranked by what was typed, with context', () => {
     expect(tool.context.after).toMatchObject({ rel: 'reply', text: expect.stringContaining('What is this for') });
   });
 
+  it('finds a word in a message already read, or marked small talk, under the Missed filter', async () => {
+    // "LiceClip" was read, and the page's default Missed filter hid it from Ask.
+    await t.db.insert(s.reviewState).values({ userId: auth.userId, messageId: ids.tool, status: 'read', reviewedRevision: 1 }).onConflictDoNothing();
+    await t.db.execute(sql`UPDATE review_state SET status = 'read', reviewed_revision = m.content_revision FROM messages m WHERE m.id = review_state.message_id AND m.id = ${ids.tool}::uuid`);
+    await t.db.update(s.messages).set({ filler: true }).where(eq(s.messages.id, ids.tool));
+    const missedOnly = (q: string) => new URLSearchParams({ q, chat: chatId, status: 'missed' });
+    const r = await ask(t.db, auth, missedOnly('liceclip'), async () => ({ interpretation: 'LiceClip', terms: ['liceclip'], topicIds: [] }));
+    expect(r.results[0]).toMatchObject({ message_id: ids.tool, match: 'exact', review: 'read' });
+    // Small talk is found by its words, never by meaning alone.
+    const byMeaning = await ask(t.db, auth, missedOnly('screen recorder'), async () => ({ interpretation: 'a tool', terms: ['liceclip'], topicIds: [] }));
+    expect(byMeaning.results.some((x) => x.message_id === ids.tool)).toBe(false);
+    await t.db.update(s.messages).set({ filler: false }).where(eq(s.messages.id, ids.tool));
+  });
+
   // Last: it changes two of the messages the tests above count.
   it('orders exact matches, then partial ones, then those found by meaning', async () => {
     const set = (id: string, body: string) => t.db.update(s.messages).set({ body, searchText: normalizeSearch(body) }).where(eq(s.messages.id, id));

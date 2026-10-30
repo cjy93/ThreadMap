@@ -141,6 +141,13 @@
       "when": 1793400180000,
       "tag": "0019_filler_override",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793323821796,
+      "tag": "0020_message_trails",
+      "breakpoints": true
     }
   ]
 }
