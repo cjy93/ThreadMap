@@ -45,7 +45,8 @@ services:
       STORAGE_DRIVER: local
     volumes: ['objects:/app/.data']
     # Only on the instance itself: a Brev tunnel or Caddy reaches it; never published on the public IP.
-    ports: ['127.0.0.1:3000:3000']
+    # APP_PORT (in .env.vm) is the instance port the Brev link points at, e.g. 8001; 3000 by default.
+    ports: ['127.0.0.1:${APP_PORT:-3000}:3000']
 
   caddy:
     image: caddy:2.8
